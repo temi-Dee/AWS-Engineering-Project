@@ -1,0 +1,73 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build and test sample app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Node.js modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies if sample app exists
+        run: |
+          if [ -f my-app/package.json ]; then
+            cd my-app
+            npm ci
+          else
+            echo "No sample app found in my-app/, skipping install."
+          fi
+      - name: Run linting if sample app exists
+        run: |
+          if [ -f my-app/package.json ]; then
+            cd my-app
+            npx eslint src/ --ext .js || echo "Linting failed, but continuing..."
+          else
+            echo "No sample app found in my-app/, skipping lint."
+          fi
+      - name: Run tests if sample app exists
+        run: |
+          if [ -f my-app/package.json ]; then
+            cd my-app
+            npm test
+          else
+            echo "No sample app found in my-app/, skipping tests."
+          fi
+      - name: Validate AWS CLI
+        run: |
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+          else
+            echo "AWS CLI is not installed."
+            exit 1
+          fi
+  deploy:
+    name: Deploy to AWS
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          aws-region: us-east-1
+      - name: Deploy application
+        run: |
+          echo "Deploying application to AWS..."
+          # Add specific deployment commands here based on your AWS service (e.g., S3, Lambda, EB)

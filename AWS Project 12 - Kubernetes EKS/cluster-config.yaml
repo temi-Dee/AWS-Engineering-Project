@@ -1,0 +1,51 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: my-eks-cluster
+  region: us-east-1
+  version: "1.29"
+  tags:
+    Environment: production
+    Project: eks-demo
+
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: general-workers
+    instanceType: t3.medium
+    minSize: 2
+    maxSize: 5
+    desiredCapacity: 3
+    volumeSize: 30
+    ssh:
+      allow: false
+    labels:
+      role: general
+    tags:
+      NodeGroup: general-workers
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        albIngress: true
+        cloudWatch: true
+        ebs: true
+
+addons:
+  - name: vpc-cni
+    version: latest
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+  - name: aws-ebs-csi-driver
+    version: latest
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator
+      - controllerManager
+      - scheduler

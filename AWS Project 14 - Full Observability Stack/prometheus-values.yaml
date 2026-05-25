@@ -1,0 +1,23 @@
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+
+alertmanager:
+  enabled: true
+
+grafana:
+  adminPassword: "admin123"
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: alb
+    hosts:
+      - grafana.example.com
