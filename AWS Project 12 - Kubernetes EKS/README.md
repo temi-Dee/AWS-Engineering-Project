@@ -246,6 +246,75 @@ helm history my-app --namespace production
 helm rollback my-app 1 --namespace production
 ```
 
+## Console Deployment
+
+> **Note:** EKS heavily requires `eksctl`, `kubectl`, and `helm`. The console steps below cover creating the EKS cluster and IAM resources via the AWS Console. You still need the CLI tools to configure `kubectl` and deploy workloads.
+
+### 1. Create EKS Cluster via Console
+
+1. Go to **EKS → Add cluster → Create**
+   - **Name:** `my-eks-cluster` | **Kubernetes version:** 1.29
+   - **Cluster service role:** click **Create recommended role** (creates `AmazonEKSClusterRole` automatically) → **Next**
+2. **Networking:** select your VPC and at least 2 subnets in different AZs | **Cluster endpoint access:** Public → **Next**
+3. **Logging:** enable **API server**, **Audit**, **Authenticator** → **Next**
+4. Review and click **Create** — takes 10–15 minutes
+
+### 2. Create Managed Node Group
+
+1. Open the cluster → **Compute → Add node group**
+   - **Name:** `general-workers` | **Node IAM role:** click **Create recommended role** → **Next**
+   - **AMI type:** Amazon Linux 2 | **Instance type:** `t3.medium` | **Disk:** 20 GiB
+   - **Min:** 2 | **Max:** 5 | **Desired:** 2 → **Next**
+2. Select your subnets → **Next → Create**
+
+### 3. Configure kubectl
+
+After the cluster is Active, run:
+
+```bash
+aws eks update-kubeconfig --name my-eks-cluster --region us-east-1
+kubectl get nodes
+```
+
+### 4. Create IAM Policies for Add-ons (Console)
+
+1. Go to **IAM → Policies → Create policy**
+2. Create `AWSLoadBalancerControllerIAMPolicy` — paste the JSON from the CLI section (Step 4)
+3. Create `ClusterAutoscalerPolicy` — paste the JSON from Step 7
+4. Create `EKS-S3-Access` — paste the JSON from Step 3
+
+### 5. Enable OIDC Provider
+
+1. Go to **EKS → my-eks-cluster → Configuration → Details**
+2. Copy the **OpenID Connect provider URL**
+3. Go to **IAM → Identity providers → Add provider**
+   - **Provider type:** OpenID Connect | paste the URL → **Get thumbprint**
+   - **Audience:** `sts.amazonaws.com` → **Add provider**
+
+### 6. Install Add-ons via Console (Optional)
+
+1. Go to **EKS → my-eks-cluster → Add-ons → Get more add-ons**
+2. Select **Amazon VPC CNI**, **CoreDNS**, **kube-proxy**, **Amazon EBS CSI Driver**
+3. Follow the prompts to install each with the latest version
+
+### 7. Deploy Workloads (requires kubectl)
+
+With `kubectl` configured, install Helm charts per Steps 4–9 in the CLI section:
+
+```bash
+helm install my-app ./my-app --namespace production --create-namespace
+kubectl get all -n production
+```
+
+### Console Cleanup
+
+1. **EKS → my-eks-cluster → Compute** → delete node groups first
+2. **EKS** → delete the cluster
+3. **IAM → Policies** → delete `AWSLoadBalancerControllerIAMPolicy`, `ClusterAutoscalerPolicy`, `EKS-S3-Access`
+4. **IAM → Identity providers** → delete the cluster OIDC provider
+
+---
+
 ## CLI / Automation Reference
 
 ```bash

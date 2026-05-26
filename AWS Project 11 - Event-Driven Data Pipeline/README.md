@@ -392,6 +392,98 @@ aws s3 cp s3://$BUCKET_NAME/processed/event_type=user_signup/year=2026/month=05/
 aws s3 ls s3://$BUCKET_NAME/processed/ --recursive | grep -oP 'event_type=\K[^/]+' | sort | uniq -c
 ```
 
+## Console Deployment
+
+### 1. Create S3 Output Bucket
+
+1. Go to **S3 → Create bucket**
+   - **Name:** `data-pipeline-output-<your-account-id>` | enable **Bucket Versioning**
+2. Click **Create bucket**
+
+### 2. Create SQS Dead-Letter Queue
+
+1. Go to **SQS → Create queue** → **Standard**
+   - **Name:** `data-pipeline-dlq`
+   - **Message retention:** 14 days | **Visibility timeout:** 300 seconds
+2. Click **Create queue** — copy the queue ARN
+
+### 3. Create SQS Main Queue
+
+1. Go to **SQS → Create queue** → **Standard**
+   - **Name:** `data-pipeline-queue`
+   - **Visibility timeout:** 300 sec | **Message retention:** 1 day
+   - **Receive message wait time:** 20 seconds (enables long polling)
+2. Under **Dead-letter queue** → enable → select `data-pipeline-dlq` → **Maximum receives:** 3
+3. Click **Create queue** — copy the queue ARN
+
+### 4. Create IAM Role for Lambda
+
+1. Go to **IAM → Roles → Create role** → Lambda → **Next**
+2. Attach **AWSLambdaBasicExecutionRole** → **Next** → **Name:** `PipelineLambdaRole` → **Create**
+3. Open the role → **Add permissions → Create inline policy** → JSON:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {"Effect":"Allow","Action":["sqs:ReceiveMessage","sqs:DeleteMessage","sqs:GetQueueAttributes","sqs:ChangeMessageVisibility"],"Resource":"<MAIN_QUEUE_ARN>"},
+       {"Effect":"Allow","Action":["sqs:ReceiveMessage","sqs:DeleteMessage","sqs:GetQueueAttributes"],"Resource":"<DLQ_ARN>"},
+       {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject","s3:HeadObject"],"Resource":"arn:aws:s3:::data-pipeline-output-<account-id>/*"}
+     ]
+   }
+   ```
+   Replace ARNs and account ID → **Policy name:** `PipelinePolicy` → **Create**
+
+### 5. Create Main Lambda Function
+
+1. Go to **Lambda → Create function → Author from scratch**
+   - **Name:** `DataPipelineProcessor` | **Runtime:** Node.js 18.x | **Role:** `PipelineLambdaRole`
+2. Paste `pipeline-lambda/index.js` into the editor → **Deploy**
+3. **Configuration → General configuration → Edit**: **Timeout:** 5 min | **Memory:** 512 MB | **Reserved concurrency:** 10
+4. **Configuration → Environment variables**: `OUTPUT_BUCKET` = your bucket name
+5. **Configuration → Triggers → Add trigger** → **SQS**
+   - **Queue:** `data-pipeline-queue` | **Batch size:** 10 | **Batching window:** 30s
+   - Enable **Report batch item failures** → **Add**
+
+### 6. Create SNS Alert Topic
+
+1. Go to **SNS → Topics → Create topic** → Standard → **Name:** `pipeline-alerts` → **Create**
+2. Click **Create subscription** → Email → enter your email → confirm from your inbox
+
+### 7. Create DLQ Processor Lambda
+
+1. Go to **Lambda → Create function** → **Name:** `DLQProcessor` | Node.js 18.x | Role: `PipelineLambdaRole`
+2. Paste the inline DLQ handler code from the CLI section → **Deploy**
+3. **Environment variables:** `OUTPUT_BUCKET` = your bucket, `ALERT_TOPIC_ARN` = your SNS ARN
+4. Add IAM inline policy to `PipelineLambdaRole` for `sns:Publish` on the topic ARN
+5. **Triggers → Add trigger → SQS** → queue: `data-pipeline-dlq` | batch size: 5 → **Add**
+
+### 8. Create CloudWatch Alarms
+
+1. Go to **CloudWatch → Alarms → Create alarm → Select metric → SQS → Per-Queue Metrics**
+2. Select `data-pipeline-dlq` → **ApproximateNumberOfMessagesVisible** → **Select metric**
+   - Threshold: GreaterThanOrEqualToThreshold → 1 | SNS action: `pipeline-alerts`
+   - **Name:** `dlq-messages-visible` → **Create**
+3. Repeat for Lambda **Errors** > 5 on `DataPipelineProcessor` → name: `pipeline-lambda-errors`
+
+### 9. Send Test Messages
+
+1. Go to **SQS → data-pipeline-queue → Send and receive messages**
+2. Paste a test message body and click **Send message**:
+   ```json
+   {"id":"evt-001","eventType":"user_signup","timestamp":"2026-05-26T10:00:00Z","source":"web-app","data":{"userId":"user-123","email":"user@example.com"}}
+   ```
+
+### Console Cleanup
+
+1. **Lambda** → delete `DataPipelineProcessor` and `DLQProcessor` (remove triggers first)
+2. **SQS** → delete `data-pipeline-queue` then `data-pipeline-dlq`
+3. **S3** → empty and delete `data-pipeline-output-<account-id>`
+4. **SNS** → delete `pipeline-alerts`
+5. **CloudWatch → Alarms** → delete `dlq-messages-visible` and `pipeline-lambda-errors`
+6. **IAM → Roles** → delete `PipelineLambdaRole`
+
+---
+
 ## CLI / Automation Reference
 
 ### CloudWatch Insights Queries

@@ -435,6 +435,88 @@ aws deploy create-deployment-config \
   }"
 ```
 
+## Console Deployment
+
+### Part A: Blue/Green with CodeDeploy
+
+#### 1. Create Target Groups
+
+1. Go to **EC2 → Target Groups → Create target group**
+   - **Type:** IP | **Name:** `blue-tg` | **Protocol:** HTTP | **Port:** 80 | **VPC:** default
+   - **Health check path:** `/health` → **Create**
+2. Repeat: **Name:** `green-tg` (same settings)
+
+#### 2. Create Application Load Balancer
+
+1. Go to **EC2 → Load Balancers → Create load balancer → Application Load Balancer**
+   - **Name:** `my-app-alb` | **Scheme:** Internet-facing | select 2+ public subnets
+2. Create a security group allowing HTTP port 80 and port 8080 → attach it
+3. **Listener HTTP:80** → default action: forward to `blue-tg`
+4. After creation, **Add listener HTTP:8080** → forward to `green-tg` (used by CodeDeploy for validation)
+
+#### 3. Create ECS Task Execution Role
+
+1. Go to **IAM → Roles → Create role** → ECS Task → attach **AmazonECSTaskExecutionRolePolicy** → **Name:** `ecsTaskExecutionRole` → **Create**
+
+#### 4. Create ECS Task Definition
+
+1. Go to **ECS → Task definitions → Create new task definition**
+   - **Family:** `my-app` | **Launch type:** Fargate | **CPU:** 0.25 | **Memory:** 0.5 GB
+   - **Container:** name: `app` | image: your ECR URI | port: 80
+2. Click **Create**
+
+#### 5. Create ECS Service with CodeDeploy Controller
+
+1. Go to **ECS → my-app-cluster → Create service**
+   - **Launch type:** Fargate | **Task definition:** `my-app` | **Service name:** `my-app-service` | **Desired tasks:** 2
+   - **Deployment type:** Blue/green (CodeDeploy)
+   - **Load balancer:** `my-app-alb` | **Production listener:** 80 | **Test listener:** 8080
+   - **Blue target group:** `blue-tg` | **Green target group:** `green-tg`
+2. Click **Create service**
+
+#### 6. Create CodeDeploy IAM Role
+
+1. Go to **IAM → Roles → Create role** → AWS service → **CodeDeploy → ECS** → attach **AWSCodeDeployRoleForECS** → **Name:** `CodeDeployECSRole` → **Create**
+
+#### 7. Create CodeDeploy Application and Deployment Group
+
+1. Go to **CodeDeploy → Applications → Create application**
+   - **Name:** `my-app` | **Compute platform:** Amazon ECS → **Create**
+2. Click **Create deployment group**
+   - **Name:** `my-app-dg` | **Service role:** `CodeDeployECSRole`
+   - **ECS cluster:** `my-app-cluster` | **ECS service:** `my-app-service`
+   - **Load balancer:** `my-app-alb` | **Prod listener:** port 80 | **Test listener:** port 8080
+   - **Blue TG:** `blue-tg` | **Green TG:** `green-tg`
+   - **Deployment config:** `CodeDeployDefault.ECSAllAtOnce`
+   - **Rollback:** enable on deployment failure → **Create**
+
+#### 8. Trigger a Blue/Green Deployment
+
+1. Go to **CodeDeploy → Applications → my-app → Create deployment**
+2. **Deployment group:** `my-app-dg` | **Revision type:** AppSpec content
+3. Paste your `appspec.yaml` content with the new task definition ARN → **Create deployment**
+4. Monitor progress — CodeDeploy will route test traffic, validate, then shift production
+
+### Part B: Canary via ALB Weighted Routing
+
+1. Go to **EC2 → Target Groups → Create target group** → **Name:** `canary-tg` | same settings as above
+2. Go to **EC2 → Load Balancers → my-app-alb → Listeners → HTTP:80 → Edit rules**
+3. Edit the default rule → change action to **Forward to multiple target groups**
+   - `blue-tg`: weight 95 | `canary-tg`: weight 5 → **Save changes**
+4. After monitoring canary health in CloudWatch, gradually increase `canary-tg` weight (10 → 25 → 50 → 100%)
+5. If metrics look bad, revert to `blue-tg` weight 100 immediately
+
+### Console Cleanup
+
+1. **CodeDeploy** → delete deployment group → delete application
+2. **ECS** → update `my-app-service` to 0 desired → delete service
+3. **EC2 → Load Balancers** → delete `my-app-alb` (delete listeners first)
+4. **EC2 → Target Groups** → delete `blue-tg`, `green-tg`, `canary-tg`
+5. **Lambda** → delete `ValidateTestTraffic`
+6. **IAM → Roles** → delete `CodeDeployECSRole` and `ValidateLambdaRole`
+
+---
+
 ## CLI / Automation Reference
 
 ```bash

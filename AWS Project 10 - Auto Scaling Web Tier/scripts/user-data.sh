@@ -22,8 +22,14 @@ server {
 NGINX
 
 mkdir -p /usr/share/nginx/html
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+# Use IMDSv2 — get a short-lived token first, then fetch metadata with it
+IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+AZ=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/availability-zone)
 
 # Use an unquoted heredoc so that $INSTANCE_ID and $AZ are expanded at runtime.
 cat > /usr/share/nginx/html/index.html <<HTML

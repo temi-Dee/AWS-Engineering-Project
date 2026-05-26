@@ -139,6 +139,30 @@ AWS Project 1 - Static Website S3 CloudFront/
 
 ---
 
+## Console Deployment
+
+Steps 1–6 above are the complete AWS Management Console deployment path. Use this quick reference and cleanup guide alongside them.
+
+### Quick Reference
+
+| Step | Service | Action |
+|------|---------|--------|
+| 1 | S3 → Create bucket | Unique name, disable Block Public Access, enable static hosting |
+| 2 | S3 → Permissions → Bucket policy | Paste public read policy |
+| 3 | S3 → Upload | Upload `index.html`, `contact.html`, `css/`, `js/` |
+| 4 | Certificate Manager (us-east-1) | Request public certificate, DNS validation |
+| 5 | CloudFront → Create distribution | Origin = S3 website endpoint, HTTPS redirect, attach ACM cert |
+| 6 | Route 53 → Hosted zone | A alias record → CloudFront distribution |
+
+### Console Cleanup
+
+1. Go to **CloudFront** → select your distribution → **Disable** → wait for **Deployed** status → **Delete**
+2. Go to **S3** → open your bucket → select all objects → **Delete objects** → then **Delete bucket**
+3. Go to **Certificate Manager** (us-east-1) → select your certificate → **Delete**
+4. Go to **Route 53** → hosted zone → delete the A records pointing to CloudFront
+
+---
+
 ## Automated Deployment (CLI)
 
 If you prefer to deploy using the provided script:
@@ -208,3 +232,24 @@ After completing this project you will understand:
 - SSL/TLS certificate management with AWS Certificate Manager
 - DNS routing with Amazon Route 53
 - Cache invalidation strategies
+
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowCloudFrontServicePrincipal",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "cloudfront.amazonaws.com"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::staticwebsitey65r5d/*",
+            "Condition": {
+                "StringEquals": {
+                    "AWS:SourceArn": "arn:aws:cloudfront::3651414:distribution/E14XLO158T6HYP"
+                }
+            }
+        }
+    ]
+}

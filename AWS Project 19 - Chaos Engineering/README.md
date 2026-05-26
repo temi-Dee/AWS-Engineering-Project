@@ -223,6 +223,73 @@ aws lambda add-permission \
   --source-arn $MONITOR_RULE_ARN
 ```
 
+## Console Deployment
+
+### 1. Create FIS IAM Role
+
+1. Go to **IAM → Roles → Create role** → AWS service → scroll down and select **Fault Injection Simulator** → **Next**
+2. Attach **PowerUserAccess** (or a scoped policy for production) → **Next**
+3. **Role name:** `FISExperimentRole` → **Create role**
+
+### 2. Create Stop-Condition CloudWatch Alarms
+
+1. Go to **CloudWatch → Alarms → Create alarm → Select metric → ApplicationELB → Per-LB Metrics**
+2. Select your ALB → **HTTPCode_Target_5XX_Count** → **Select metric**
+   - **Period:** 1 min | **Statistic:** Sum | **Threshold:** Greater than 50
+   - **Alarm name:** `high-error-rate` → **Create alarm**
+3. Repeat for **TargetResponseTime** > 2 seconds → **Alarm name:** `high-latency`
+
+### 3. Create CPU Stress FIS Experiment
+
+1. Go to **FIS → Experiment templates → Create experiment template**
+2. **Description:** CPU stress on EC2 | **IAM role:** `FISExperimentRole`
+3. **Actions → Add action**
+   - **Name:** `cpu-stress` | **Action type:** `aws:ssm:send-command/AWSFIS-Run-CPU-Stress`
+   - **Duration:** 5 minutes | **Workers:** 0 (all CPUs) | **Load:** 100
+4. **Targets → Add target**
+   - **Name:** `ec2-instances` | **Resource type:** `aws:ec2:instance`
+   - **Selection mode:** All | **Filter:** tag `ChaosEnabled=true`
+5. **Stop conditions:** add both `high-error-rate` and `high-latency` alarms
+6. Click **Create experiment template**
+
+### 4. Create ECS Task-Stop FIS Experiment
+
+1. **FIS → Create experiment template**
+2. **Action type:** `aws:ecs:stop-task`
+   - **Cluster:** `my-app-cluster` | select target service | stop **1** random task
+3. **Stop conditions:** `high-error-rate` and `high-latency`
+4. Click **Create experiment template**
+
+### 5. Create Steady-State Monitor Lambda
+
+1. Go to **IAM → Roles → Create role** → Lambda → attach **AWSLambdaBasicExecutionRole** → **Name:** `ChaosMonitorRole`
+2. Add inline policy:
+   ```json
+   {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["cloudwatch:GetMetricStatistics","fis:ListExperiments","fis:StopExperiment"],"Resource":"*"}]}
+   ```
+   **Policy name:** `ChaosMonitorPolicy`
+3. Go to **Lambda → Create function** → **Name:** `ChaosEngineeringMonitor` | Python 3.11 | Role: `ChaosMonitorRole`
+4. Paste `steady-state-monitor.py` → **Deploy**
+5. **Configuration → Environment variables:** `ALB_DIMENSION` = your ALB suffix (e.g. `app/my-alb/abc123`) | `LATENCY_THRESHOLD_SECONDS` = `0.5`
+6. Go to **EventBridge → Rules → Create rule** → **Schedule** → rate 1 minute → **Target:** `ChaosEngineeringMonitor` → **Create**
+
+### 6. Run an Experiment
+
+1. Go to **FIS → Experiment templates** → select your CPU stress template → **Start experiment**
+2. Confirm by typing `start` → click **Start experiment**
+3. Monitor the experiment state in FIS → go to **CloudWatch** to watch metrics in real time
+4. FIS will stop automatically if a stop-condition alarm fires, or click **Stop experiment** to halt manually
+
+### Console Cleanup
+
+1. **FIS → Experiment templates** → delete CPU stress and ECS templates
+2. **Lambda** → delete `ChaosEngineeringMonitor`
+3. **EventBridge → Rules** → delete `chaos-steady-state-monitor`
+4. **CloudWatch → Alarms** → delete `high-error-rate` and `high-latency`
+5. **IAM → Roles** → delete `ChaosMonitorRole` and `FISExperimentRole`
+
+---
+
 ## Architecture
 
 ```

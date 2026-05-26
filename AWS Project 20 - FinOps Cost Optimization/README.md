@@ -297,6 +297,81 @@ aws ce get-reservation-coverage \
   --granularity MONTHLY
 ```
 
+## Console Deployment
+
+### 1. Enable Cost Explorer and Activate Cost Allocation Tags
+
+1. Go to **Billing and Cost Management → Cost Explorer → Enable Cost Explorer**
+2. Go to **Billing → Cost allocation tags**
+3. Under **AWS-generated cost allocation tags**, activate: `Environment`, `Team`, `Application`, `CostCenter`
+4. Click **Activate** — tags appear in Cost Explorer after up to 24 hours
+
+### 2. Create SNS Alert Topic
+
+1. Go to **SNS → Topics → Create topic** → Standard → **Name:** `billing-alerts` → **Create**
+2. **Create subscription** → Email → enter your finance email → confirm from inbox
+
+### 3. Create Monthly Budget
+
+1. Go to **Budgets → Create budget**
+2. **Budget type:** Cost budget | **Name:** `Monthly-Total-Budget`
+3. **Budgeted amount:** set your monthly limit (e.g. $500) | **Period:** Monthly
+4. **Alerts:**
+   - Add alert: 75% of budgeted amount → notify SNS topic `billing-alerts`
+   - Add alert: 90% of budgeted amount → notify SNS topic
+   - Add alert: 100% forecasted → notify SNS topic
+5. Click **Create budget**
+
+### 4. Create Per-Team Budget
+
+1. **Budgets → Create budget** → Cost budget → **Name:** `Team-Engineering-Budget`
+2. **Budgeted amount:** $5,000 | **Filter:** Tag: Team = Engineering
+3. Add alert at 80% → notify `billing-alerts` → **Create budget**
+
+### 5. Enable Cost Anomaly Detection
+
+1. Go to **Cost Explorer → Cost Anomaly Detection → Create monitor**
+   - **Monitor type:** AWS services | **Name:** `ServiceLevelSpendMonitor` → **Create**
+2. Click **Create subscription**
+   - **Name:** `DailyAnomalyAlerts` | **Threshold:** $100 | **Frequency:** Daily
+   - **Alert recipients:** SNS topic `billing-alerts` → **Create**
+
+### 6. Enable Compute Optimizer
+
+1. Go to **Compute Optimizer → Get started → Opt in** (or **Activate Compute Optimizer**)
+2. After 24–48 hours of data collection, go to:
+   - **EC2 instances** — view over/under-provisioned instance recommendations
+   - **Lambda functions** — view memory size recommendations
+   - Each card shows estimated monthly savings
+
+### 7. Create Waste Detector Lambda
+
+1. Go to **IAM → Roles → Create role** → Lambda → attach **AWSLambdaBasicExecutionRole** → **Name:** `WasteDetectorRole`
+2. Add inline policy with the JSON from the CLI section (EC2, S3, CloudWatch, SNS permissions) → **Name:** `WasteDetectorPolicy`
+3. Go to **Lambda → Create function** → **Name:** `CostWasteDetector` | Python 3.11 | Role: `WasteDetectorRole`
+4. Paste `waste-detector.py` → **Deploy**
+5. **Configuration → Environment variables:** `SNS_TOPIC_ARN` = your billing-alerts ARN
+6. **Configuration → General configuration:** **Timeout:** 5 minutes
+7. Go to **EventBridge → Rules → Create rule** → **Schedule expression:** `cron(0 9 ? * MON *)` → **Target:** `CostWasteDetector` → **Create**
+
+### 8. Set Up Tagging Policy in AWS Organizations (Optional)
+
+1. Go to **AWS Organizations → Policies → Tag policies → Create policy**
+2. Paste the contents of `tagging-policy.json` → **Save changes**
+3. Go to **AWS Organizations → Root → Policies** → attach the tag policy
+
+### Console Cleanup
+
+1. **Budgets** → delete `Monthly-Total-Budget` and `Team-Engineering-Budget`
+2. **Cost Anomaly Detection** → delete subscription and monitor
+3. **Lambda** → delete `CostWasteDetector`
+4. **EventBridge → Rules** → delete `weekly-cost-scan`
+5. **SNS** → delete `billing-alerts`
+6. **IAM → Roles** → delete `WasteDetectorRole`
+7. **AWS Organizations** → detach and delete tagging policy (if created)
+
+---
+
 ## FinOps Framework
 
 ```

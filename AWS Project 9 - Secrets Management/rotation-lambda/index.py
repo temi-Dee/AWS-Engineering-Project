@@ -54,7 +54,8 @@ def test_secret(arn, token):
         database=pending['dbname'],
         user=pending['username'],
         password=pending['password'],
-        port=pending['port']
+        port=pending['port'],
+        connect_timeout=5
     )
     conn.close()
 
@@ -85,6 +86,6 @@ def get_version_id(arn, stage):
 
 
 def generate_password(length=32):
-    import random, string
+    import secrets, string
     chars = string.ascii_letters + string.digits + '!@#$%^&*()'
-    return ''.join(random.choice(chars) for _ in range(length))
+    return ''.join(secrets.choice(chars) for _ in range(length))

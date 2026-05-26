@@ -1,9 +1,29 @@
-const AWS = require('aws-sdk');
-const ses = new AWS.SES({ region: process.env.AWS_REGION });
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+const ses = new SESClient({ region: process.env.AWS_REGION });
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
 
 exports.handler = async (event) => {
     console.log('Received event:', JSON.stringify(event, null, 2));
-    
+
+    const senderEmail = process.env.SENDER_EMAIL;
+    const recipientEmail = process.env.RECIPIENT_EMAIL;
+    if (!senderEmail || !recipientEmail) {
+        console.error('Missing required env vars: SENDER_EMAIL, RECIPIENT_EMAIL');
+        return {
+            statusCode: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, message: 'Service configuration error.' })
+        };
+    }
+
     try {
         // Parse request body
         const body = JSON.parse(event.body);
@@ -44,9 +64,9 @@ exports.handler = async (event) => {
         
         // Email parameters
         const params = {
-            Source: process.env.SENDER_EMAIL,
+            Source: senderEmail,
             Destination: {
-                ToAddresses: [process.env.RECIPIENT_EMAIL]
+                ToAddresses: [recipientEmail]
             },
             Message: {
                 Subject: {
@@ -89,17 +109,17 @@ This message was sent via the serverless contact form (Project 3).
         </div>
         <div class="content">
             <div class="field">
-                <span class="label">From:</span> ${name}
+                <span class="label">From:</span> ${escapeHtml(name)}
             </div>
             <div class="field">
-                <span class="label">Email:</span> <a href="mailto:${email}">${email}</a>
+                <span class="label">Email:</span> <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>
             </div>
             <div class="field">
                 <span class="label">Received:</span> ${new Date().toLocaleString()}
             </div>
             <div class="message-box">
                 <div class="label">Message:</div>
-                <p>${message.replace(/\n/g, '<br>')}</p>
+                <p>${escapeHtml(message).replace(/\n/g, '<br>')}</p>
             </div>
         </div>
         <div class="footer">
@@ -115,7 +135,7 @@ This message was sent via the serverless contact form (Project 3).
         };
         
         // Send email
-        const result = await ses.sendEmail(params).promise();
+        const result = await ses.send(new SendEmailCommand(params));
         console.log('Email sent successfully:', result.MessageId);
         
         return {
@@ -146,8 +166,7 @@ This message was sent via the serverless contact form (Project 3).
             },
             body: JSON.stringify({
                 success: false,
-                message: 'Failed to send email. Please try again later.',
-                error: error.message
+                message: 'Failed to send email. Please try again later.'
             })
         };
     }

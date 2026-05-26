@@ -1,3 +1,4 @@
+# Replace YOUR_USERNAME with your GitHub username or organization before applying.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -16,3 +17,11 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

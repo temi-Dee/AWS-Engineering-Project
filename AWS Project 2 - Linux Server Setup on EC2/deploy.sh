@@ -129,8 +129,12 @@ NGINX
 
 # Create web page
 mkdir -p /var/www/html
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+AZ=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/availability-zone)
 
 cat > /var/www/html/index.html << HTML
 <!DOCTYPE html>
@@ -198,6 +202,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --key-name $KEY_NAME \
   --security-group-ids $SG_ID \
   --iam-instance-profile Name=WebServerProfile \
+  --metadata-options HttpTokens=required,HttpEndpoint=enabled \
   --user-data file://user-data.sh \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Project2-WebServer},{Key=Project,Value=EC2-Setup}]' \
   --query 'Instances[0].InstanceId' \
@@ -239,3 +244,4 @@ Web URL: http://$PUBLIC_IP
 EOF
 
 echo "Instance info saved to instance-info.txt"
+:

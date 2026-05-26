@@ -261,6 +261,68 @@ kubectl annotate application frontend -n argocd \
   argocd-image-updater.argoproj.io/write-back-method="git"
 ```
 
+## Console Deployment
+
+> **Note:** ArgoCD runs inside Kubernetes and requires `kubectl`, `helm`, and a running EKS cluster. The console steps below cover the AWS-side setup. The rest uses CLI tools.
+
+### 1. Verify EKS Cluster (AWS Console)
+
+1. Go to **EKS → Clusters** and confirm `my-eks-cluster` is Active with healthy nodes
+2. If not yet created, follow Project 12's Console Deployment section first
+
+### 2. Create GitHub Repository (GitHub UI)
+
+1. Go to **github.com → New repository**
+   - **Name:** `gitops-apps` | **Visibility:** Public → **Create repository**
+2. Copy the repository contents from `gitops-repo/` in this project
+3. Replace all `YOUR_USERNAME` placeholders with your GitHub username
+4. Commit and push to the repository
+
+### 3. Generate GitHub Personal Access Token (GitHub UI)
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**
+2. Click **Generate new token** → select scopes: `repo` (full)
+3. Copy and save the token — you will use it in Step 4
+
+### 4. Install ArgoCD (requires kubectl)
+
+Configure kubectl first, then:
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=300s
+ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+```
+
+### 5. Access ArgoCD UI (Browser)
+
+1. Open `https://localhost:8080` in your browser
+2. Log in: **Username:** `admin` | **Password:** the value of `$ARGOCD_PASSWORD`
+3. Click **Settings → Repositories → Connect Repo**
+   - **Type:** HTTPS | **URL:** `https://github.com/YOUR_USERNAME/gitops-apps`
+   - **Username:** your GitHub username | **Password:** your personal access token
+4. Click **Connect** and verify the repo shows green
+
+### 6. Create Root Application in ArgoCD UI
+
+1. In the ArgoCD UI, click **New App**
+   - **Application name:** `root-apps`
+   - **Project:** `default`
+   - **Sync policy:** Automatic | enable **Prune** and **Self Heal**
+   - **Repository URL:** your gitops-apps repo URL | **Path:** `apps`
+   - **Cluster URL:** `https://kubernetes.default.svc` | **Namespace:** `argocd`
+2. Click **Create** — ArgoCD will create child Applications for frontend, backend, and monitoring
+
+### Console Cleanup
+
+1. In ArgoCD UI → select `root-apps` → **Delete** with cascade option
+2. **kubectl:** `kubectl delete namespace argocd production monitoring`
+3. **EKS Console:** delete cluster if no longer needed (see Project 12 cleanup)
+
+---
+
 ## CLI / Automation Reference
 
 ### Testing the GitOps Workflow

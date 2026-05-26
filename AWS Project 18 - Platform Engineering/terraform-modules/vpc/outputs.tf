@@ -22,3 +22,13 @@ output "public_route_table_id" {
   description = "ID of the public route table"
   value       = aws_route_table.public.id
 }
+
+output "private_subnet_ids" {
+  description = "List of IDs of the private subnets"
+  value       = aws_subnet.private[*].id
+}
+
+output "nat_gateway_ids" {
+  description = "List of IDs of the NAT Gateways"
+  value       = aws_nat_gateway.this[*].id
+}

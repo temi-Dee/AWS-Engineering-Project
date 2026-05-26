@@ -296,6 +296,88 @@ aws autoscaling describe-instance-refreshes \
   --auto-scaling-group-name web-tier-asg
 ```
 
+## Console Deployment
+
+### 1. Create Security Groups
+
+1. Go to **EC2 → Security Groups → Create security group**
+   - **Name:** `alb-sg` | **VPC:** your VPC
+   - **Inbound:** HTTP port 80, HTTPS port 443, Source: `0.0.0.0/0` → **Create**
+2. Create a second security group:
+   - **Name:** `ec2-web-sg` | **VPC:** your VPC
+   - **Inbound:** HTTP port 80, Source: `alb-sg`
+   - **Inbound:** SSH port 22, Source: My IP → **Create**
+
+### 2. Create IAM Role for EC2
+
+1. Go to **IAM → Roles → Create role** → AWS service → EC2 → **Next**
+2. Attach **CloudWatchAgentServerPolicy** and **AmazonSSMManagedInstanceCore** → **Next**
+3. **Role name:** `WebServerRole` → **Create role**
+
+### 3. Create Key Pair
+
+1. Go to **EC2 → Key Pairs → Create key pair**
+   - **Name:** `web-server-key` | RSA | .pem → download and save securely
+
+### 4. Create Launch Template
+
+1. Go to **EC2 → Launch Templates → Create launch template**
+   - **Name:** `WebServerTemplate` | **Version description:** v1
+   - **AMI:** search for `Amazon Linux 2023`, select the latest
+   - **Instance type:** `t3.micro`
+   - **Key pair:** `web-server-key`
+   - **Security groups:** `ec2-web-sg`
+   - **IAM instance profile:** `WebServerRole`
+   - **Advanced details → User data:** paste the contents of `scripts/user-data.sh`
+2. Click **Create launch template**
+
+### 5. Create Target Group
+
+1. Go to **EC2 → Target Groups → Create target group**
+   - **Target type:** Instances | **Name:** `web-servers-tg` | **Protocol:** HTTP | **Port:** 80 | **VPC:** your VPC
+   - **Health check path:** `/health` | **Healthy threshold:** 2 | **Unhealthy threshold:** 3
+2. Click **Create target group**
+
+### 6. Create Application Load Balancer
+
+1. Go to **EC2 → Load Balancers → Create load balancer → Application Load Balancer**
+   - **Name:** `web-tier-alb` | **Scheme:** Internet-facing | **IP type:** IPv4
+   - **Subnets:** select at least 2 public subnets in different AZs
+   - **Security group:** `alb-sg`
+   - **Listener:** HTTP:80 → forward to `web-servers-tg`
+2. Click **Create load balancer** — copy the DNS name when ready
+
+### 7. Create Auto Scaling Group
+
+1. Go to **EC2 → Auto Scaling Groups → Create Auto Scaling group**
+   - **Name:** `web-tier-asg`
+   - **Launch template:** `WebServerTemplate` (latest version) → **Next**
+   - **VPC:** your VPC | **Availability Zones/Subnets:** select 2+ public subnets → **Next**
+   - **Load balancing:** attach to `web-servers-tg` | **Health check:** ELB | **Grace period:** 300s → **Next**
+   - **Group size:** Desired: 2 | Min: 2 | Max: 10 → **Next**
+2. Click through remaining steps → **Create Auto Scaling group**
+
+### 8. Configure Scaling Policies
+
+1. Open `web-tier-asg` → **Automatic scaling → Create dynamic scaling policy**
+2. **Policy type:** Target tracking
+   - **Metric:** Average CPU utilization | **Target value:** 60 → **Create**
+3. For scheduled scaling: **Scheduled actions → Create scheduled action**
+   - Scale-up: Desired 4, Recurrence `0 8 * * MON-FRI`
+   - Scale-down: Desired 2, Recurrence `0 20 * * MON-FRI`
+
+### Console Cleanup
+
+1. **EC2 → Auto Scaling Groups** → delete `web-tier-asg`
+2. **EC2 → Load Balancers** → delete `web-tier-alb`
+3. **EC2 → Target Groups** → delete `web-servers-tg`
+4. **EC2 → Launch Templates** → delete `WebServerTemplate`
+5. **EC2 → Security Groups** → delete `ec2-web-sg` then `alb-sg`
+6. **EC2 → Key Pairs** → delete `web-server-key`
+7. **IAM → Roles** → delete `WebServerRole`
+
+---
+
 ## CLI Automation
 
 The `scripts/create-asg.sh` script automates steps 3 and 5. Export the required variables before running it:

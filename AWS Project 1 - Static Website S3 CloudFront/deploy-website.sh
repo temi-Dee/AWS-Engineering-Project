@@ -1,92 +1,75 @@
 #!/bin/bash
-# Project 1: Deploy Static Website to S3 + CloudFront
+# Project 1: Deploy Static Website to S3 + CloudFront (OAC - private bucket)
 
 set -e
 
 echo "🚀 Deploying Static Website to S3 + CloudFront..."
 
-# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Variables
 REGION="us-east-1"
 BUCKET_NAME="my-static-website-$(date +%s)"
 
-# Step 1: Create S3 Bucket
-echo -e "${BLUE}Step 1: Creating S3 bucket...${NC}"
+# ── Step 1: Create private S3 bucket ────────────────────────────────────────
+echo -e "${BLUE}Step 1: Creating private S3 bucket...${NC}"
 aws s3 mb s3://$BUCKET_NAME --region $REGION
 
-# Step 2: Configure bucket for static website hosting
-echo -e "${BLUE}Step 2: Configuring static website hosting...${NC}"
-aws s3 website s3://$BUCKET_NAME \
-  --index-document index.html \
-  --error-document index.html
-
-# Step 3: Disable block public access
-echo -e "${BLUE}Step 3: Disabling block public access...${NC}"
+# Block all public access — CloudFront will access via OAC, not public URLs
 aws s3api put-public-access-block \
   --bucket $BUCKET_NAME \
   --public-access-block-configuration \
-    "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
-# Step 4: Add bucket policy
-echo -e "${BLUE}Step 4: Applying bucket policy...${NC}"
-cat > bucket-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Sid": "PublicReadGetObject",
-    "Effect": "Allow",
-    "Principal": "*",
-    "Action": "s3:GetObject",
-    "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
-  }]
-}
-EOF
+echo -e "${GREEN}✓ Private S3 bucket created${NC}"
 
-aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy file://bucket-policy.json
-
-# Step 5: Upload website files
-echo -e "${BLUE}Step 5: Uploading website files...${NC}"
+# ── Step 2: Upload website files ─────────────────────────────────────────────
+echo -e "${BLUE}Step 2: Uploading website files...${NC}"
 aws s3 sync . s3://$BUCKET_NAME \
   --exclude "*.sh" \
   --exclude "*.md" \
-  --exclude "bucket-policy.json" \
-  --exclude ".git/*"
+  --exclude ".git/*" \
+  --exclude "deployment-info.txt"
+echo -e "${GREEN}✓ Files uploaded${NC}"
 
-# Step 6: Create CloudFront distribution
-echo -e "${BLUE}Step 6: Creating CloudFront distribution...${NC}"
-cat > cloudfront-config.json << EOF
+# ── Step 3: Create CloudFront Origin Access Control ──────────────────────────
+echo -e "${BLUE}Step 3: Creating CloudFront Origin Access Control...${NC}"
+OAC_ID=$(aws cloudfront create-origin-access-control \
+  --origin-access-control-config "{
+    \"Name\": \"oac-${BUCKET_NAME}\",
+    \"Description\": \"OAC for ${BUCKET_NAME}\",
+    \"SigningProtocol\": \"sigv4\",
+    \"SigningBehavior\": \"always\",
+    \"OriginAccessControlOriginType\": \"s3\"
+  }" \
+  --query 'OriginAccessControl.Id' --output text)
+echo -e "${GREEN}✓ OAC created: $OAC_ID${NC}"
+
+# ── Step 4: Create CloudFront distribution ───────────────────────────────────
+echo -e "${BLUE}Step 4: Creating CloudFront distribution...${NC}"
+cat > /tmp/cf-config-${BUCKET_NAME}.json << EOF
 {
   "CallerReference": "website-$(date +%s)",
-  "Comment": "Static website distribution",
+  "Comment": "Static website - ${BUCKET_NAME}",
   "Enabled": true,
+  "DefaultRootObject": "index.html",
   "Origins": {
     "Quantity": 1,
     "Items": [{
       "Id": "S3-${BUCKET_NAME}",
-      "DomainName": "${BUCKET_NAME}.s3-website-${REGION}.amazonaws.com",
-      "CustomOriginConfig": {
-        "HTTPPort": 80,
-        "HTTPSPort": 443,
-        "OriginProtocolPolicy": "http-only"
-      }
+      "DomainName": "${BUCKET_NAME}.s3.${REGION}.amazonaws.com",
+      "S3OriginConfig": {"OriginAccessIdentity": ""},
+      "OriginAccessControlId": "${OAC_ID}"
     }]
   },
-  "DefaultRootObject": "index.html",
   "DefaultCacheBehavior": {
     "TargetOriginId": "S3-${BUCKET_NAME}",
     "ViewerProtocolPolicy": "redirect-to-https",
     "AllowedMethods": {
       "Quantity": 2,
       "Items": ["GET", "HEAD"],
-      "CachedMethods": {
-        "Quantity": 2,
-        "Items": ["GET", "HEAD"]
-      }
+      "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}
     },
     "ForwardedValues": {
       "QueryString": false,
@@ -96,41 +79,76 @@ cat > cloudfront-config.json << EOF
     "DefaultTTL": 86400,
     "MaxTTL": 31536000,
     "Compress": true,
-    "TrustedSigners": {
-      "Enabled": false,
-      "Quantity": 0
-    }
+    "TrustedSigners": {"Enabled": false, "Quantity": 0}
+  },
+  "CustomErrorResponses": {
+    "Quantity": 1,
+    "Items": [{
+      "ErrorCode": 404,
+      "ResponsePagePath": "/index.html",
+      "ResponseCode": "200",
+      "ErrorCachingMinTTL": 300
+    }]
   }
 }
 EOF
 
 DIST_ID=$(aws cloudfront create-distribution \
-  --distribution-config file://cloudfront-config.json \
-  --query 'Distribution.Id' \
-  --output text)
+  --distribution-config file:///tmp/cf-config-${BUCKET_NAME}.json \
+  --query 'Distribution.Id' --output text)
+
+DIST_ARN=$(aws cloudfront get-distribution \
+  --id $DIST_ID \
+  --query 'Distribution.ARN' --output text)
 
 DIST_DOMAIN=$(aws cloudfront get-distribution \
   --id $DIST_ID \
-  --query 'Distribution.DomainName' \
-  --output text)
+  --query 'Distribution.DomainName' --output text)
 
-# Clean up temp files
-rm -f bucket-policy.json cloudfront-config.json
+rm -f /tmp/cf-config-${BUCKET_NAME}.json
+echo -e "${GREEN}✓ CloudFront distribution created: $DIST_ID${NC}"
 
-# Save deployment info
+# ── Step 5: Grant CloudFront OAC read access to the bucket ───────────────────
+echo -e "${BLUE}Step 5: Applying bucket policy for CloudFront OAC...${NC}"
+cat > /tmp/bucket-policy-${BUCKET_NAME}.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "AllowCloudFrontOAC",
+    "Effect": "Allow",
+    "Principal": {"Service": "cloudfront.amazonaws.com"},
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::${BUCKET_NAME}/*",
+    "Condition": {
+      "StringEquals": {
+        "AWS:SourceArn": "${DIST_ARN}"
+      }
+    }
+  }]
+}
+EOF
+
+aws s3api put-bucket-policy \
+  --bucket $BUCKET_NAME \
+  --policy file:///tmp/bucket-policy-${BUCKET_NAME}.json
+
+rm -f /tmp/bucket-policy-${BUCKET_NAME}.json
+echo -e "${GREEN}✓ Bucket policy applied${NC}"
+
+# ── Save deployment info ──────────────────────────────────────────────────────
 cat > deployment-info.txt << EOF
 Static Website Deployment
 =========================
+S3 Bucket:                    $BUCKET_NAME
+OAC ID:                       $OAC_ID
+CloudFront Distribution ID:   $DIST_ID
+CloudFront URL:               https://$DIST_DOMAIN
 
-S3 Bucket: $BUCKET_NAME
-S3 Website URL: http://${BUCKET_NAME}.s3-website-${REGION}.amazonaws.com
-CloudFront Distribution ID: $DIST_ID
-CloudFront URL: https://$DIST_DOMAIN
-
-Note: CloudFront distribution takes 15-20 minutes to deploy.
+Note: CloudFront distribution takes 15-20 minutes to fully deploy.
+Note: The S3 bucket is private — objects are accessible only via CloudFront.
 
 Cleanup:
-Run ./cleanup-website.sh to delete all resources
+  Run ./cleanup-website.sh to delete all resources
 EOF
 
 echo ""
@@ -138,9 +156,8 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ Deployment Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "S3 Website URL: ${BLUE}http://${BUCKET_NAME}.s3-website-${REGION}.amazonaws.com${NC}"
 echo -e "CloudFront URL: ${BLUE}https://$DIST_DOMAIN${NC}"
+echo "(S3 bucket is private — no direct bucket URL)"
 echo ""
-echo "⏳ CloudFront distribution is deploying (15-20 minutes)"
+echo "⏳ CloudFront distribution is deploying (~15-20 minutes)"
 echo "📝 Deployment info saved to deployment-info.txt"
-echo ""

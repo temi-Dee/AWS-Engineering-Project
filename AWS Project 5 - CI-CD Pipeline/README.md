@@ -177,6 +177,75 @@ After the deploy job completes, check the S3 bucket:
 aws s3 ls s3://<bucket-name>/
 ```
 
+## Console Deployment
+
+### 1. Create IAM OIDC Provider for GitHub Actions
+
+1. Go to **IAM → Identity providers → Add provider**
+2. **Provider type:** OpenID Connect
+3. **Provider URL:** `https://token.actions.githubusercontent.com` → click **Get thumbprint**
+4. **Audience:** `sts.amazonaws.com` → click **Add provider**
+
+### 2. Create IAM Role for GitHub Actions
+
+1. Go to **IAM → Roles → Create role**
+2. **Trusted entity type:** Web identity
+3. **Identity provider:** `token.actions.githubusercontent.com` | **Audience:** `sts.amazonaws.com` → click **Next**
+4. Attach **AmazonS3FullAccess** and **CloudFrontFullAccess** → click **Next**
+5. **Role name:** `GitHubActionsRole` → click **Create role**
+6. Open the role → **Trust relationships → Edit trust policy** and add a `Condition` to restrict to your repo:
+   ```json
+   "Condition": {
+     "StringLike": {
+       "token.actions.githubusercontent.com:sub": "repo:<your-github-username>/<your-repo-name>:*"
+     }
+   }
+   ```
+7. Click **Update policy**
+
+### 3. Create S3 Bucket for Artifacts
+
+1. Go to **S3 → Create bucket**
+   - **Bucket name:** unique name e.g. `myapp-cicd-artifacts-12345` | **Region:** us-east-1
+   - Uncheck **Block all public access** → acknowledge the warning
+2. Click **Create bucket**
+3. Open the bucket → **Properties → Static website hosting → Edit** → enable, **Index document:** `index.html` → **Save**
+4. Go to **Permissions → Bucket policy** and add a public read policy replacing `YOUR_BUCKET_NAME`:
+   ```json
+   {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::YOUR_BUCKET_NAME/*"}]}
+   ```
+
+### 4. Copy Your AWS Account ID
+
+1. Click your account name in the top-right corner → **Account** → copy the 12-digit **Account ID**
+
+### 5. Add Secrets to GitHub
+
+1. Go to your GitHub repository → **Settings → Secrets and variables → Actions**
+2. Click **New repository secret** and add:
+   - **Name:** `AWS_ACCOUNT_ID` | **Value:** your 12-digit account ID
+   - **Name:** `S3_BUCKET_NAME` | **Value:** your bucket name
+3. Click **Add secret** for each
+
+### 6. Push Code and Monitor
+
+1. Commit and push your code to `main`:
+   ```bash
+   git add .
+   git commit -m "Initial CI/CD setup"
+   git push origin main
+   ```
+2. Go to your GitHub repository → **Actions** tab → watch the workflow run in real time
+3. On success, open your S3 bucket in the AWS Console to confirm the deployed artifacts are present
+
+### Console Cleanup
+
+1. **S3** → open your bucket → select all objects → **Delete objects** → then **Delete bucket**
+2. **IAM → Roles** → delete `GitHubActionsRole` (detach policies first)
+3. **IAM → Identity providers** → delete `token.actions.githubusercontent.com`
+
+---
+
 ## Cleanup
 
 ```bash

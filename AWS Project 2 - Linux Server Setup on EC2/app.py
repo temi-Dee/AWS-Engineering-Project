@@ -134,5 +134,5 @@ def metrics():
     }, 200
 
 if __name__ == '__main__':
-    # Run on all interfaces, port 80
-    app.run(host='0.0.0.0', port=80, debug=False)
+    # Run on 8080; nginx (running as root briefly to bind 80) proxies to this port
+    app.run(host='0.0.0.0', port=8080, debug=False)

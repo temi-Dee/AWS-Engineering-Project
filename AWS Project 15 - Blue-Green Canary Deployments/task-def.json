@@ -7,8 +7,17 @@
   "containerDefinitions": [
     {
       "name": "app",
-      "image": "REPLACE_WITH_ECR_IMAGE",
+      "image": "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/my-app:latest",
+      "essential": true,
+      "user": "1000",
       "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

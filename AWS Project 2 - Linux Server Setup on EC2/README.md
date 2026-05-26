@@ -110,6 +110,32 @@ AWS Project 2 - Linux Server Setup on EC2/
 3. Select your instance.
 4. Review metrics: CPU utilization, network, disk I/O, and status check failures.
 
+## Console Deployment
+
+Steps 1–8 above are the complete AWS Management Console deployment path. Use this quick reference and cleanup guide alongside them.
+
+### Quick Reference
+
+| Step | Service | Action |
+|------|---------|--------|
+| 1 | EC2 → Security Groups → Create | Name: `project2-web-server-sg`, add SSH/HTTP/HTTPS inbound rules |
+| 2 | IAM → Roles → Create role | AWS service → EC2, attach `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`, name: `Project2-EC2-Role` |
+| 3 | EC2 → Key Pairs → Create | Name: `project2-key`, RSA, .pem format — save securely |
+| 4 | EC2 → Launch instances | Ubuntu 22.04, t2.micro, attach key pair + SG + IAM role, paste `user-data.sh` in Advanced details |
+| 5 | EC2 → Instances | Wait for 2/2 status checks, copy Public IPv4 address |
+| 6 | Browser | Open `http://<PUBLIC_IP>` and confirm healthy response |
+| 7 | EC2 → Connect → Session Manager | Browser terminal, no SSH key required |
+| 8 | CloudWatch → Instances | Review CPU, network, disk metrics |
+
+### Console Cleanup
+
+1. Go to **EC2 → Instances** → select `Project2-Web-Server` → **Instance state → Terminate instance**
+2. Wait for termination, then go to **EC2 → Security Groups** → delete `project2-web-server-sg`
+3. Go to **EC2 → Key Pairs** → delete `project2-key`
+4. Go to **IAM → Roles** → delete `Project2-EC2-Role`
+
+---
+
 ## CLI / Automation
 
 Use `deploy.sh` to create all resources automatically with the AWS CLI:

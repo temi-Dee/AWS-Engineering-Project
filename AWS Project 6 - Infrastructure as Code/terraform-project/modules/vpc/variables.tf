@@ -17,3 +17,8 @@ variable "public_subnet_cidrs" {
 variable "private_subnet_cidrs" {
   type = list(string)
 }
+
+variable "allowed_ssh_cidr" {
+  type        = string
+  description = "CIDR block permitted to SSH into web servers — must be set explicitly (e.g. your office IP /32)"
+}

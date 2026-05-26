@@ -343,6 +343,91 @@ aws cloudtrail create-trail \
 aws cloudtrail start-logging --name production-trail
 ```
 
+## Console Deployment
+
+### 1. Enable GuardDuty
+
+1. Go to **GuardDuty → Get Started → Enable GuardDuty**
+2. After enabling, click **Settings → Finding publishing frequency** → set to **15 minutes**
+3. To generate sample findings for testing: **Settings → Generate sample findings**
+
+### 2. Enable Security Hub
+
+1. Go to **Security Hub → Go to Security Hub → Enable Security Hub**
+2. On the standards page, enable:
+   - **AWS Foundational Security Best Practices**
+   - **CIS AWS Foundations Benchmark v1.2.0**
+3. Click **Enable Security Hub**
+
+### 3. Enable AWS Config
+
+1. Go to **AWS Config → Get started**
+2. **Settings:**
+   - **Record all resources** supported in this region + global resources
+   - **Amazon S3 bucket:** Create a new bucket → name: `aws-config-<account-id>`
+   - **IAM role:** Create a role automatically
+3. Click **Next → Confirm**
+
+### 4. Add Config Rules
+
+1. Go to **AWS Config → Rules → Add rule**
+2. Add each of these managed rules (search by name):
+   - `restricted-ssh`, `s3-bucket-public-read-prohibited`, `s3-bucket-server-side-encryption-enabled`
+   - `encrypted-volumes`, `iam-password-policy`, `mfa-enabled-for-iam-console-access`, `cloudtrail-enabled`
+3. Click **Next → Save** for each rule
+
+### 5. Enable AWS Inspector
+
+1. Go to **Inspector → Get started → Enable Inspector**
+2. Select scan types: **EC2 scanning**, **ECR container scanning**, **Lambda function scanning**
+3. Click **Enable Inspector**
+4. After a few minutes, view findings under **Inspector → Findings**
+
+### 6. Create SNS Alert Topic
+
+1. Go to **SNS → Topics → Create topic** → Standard → **Name:** `security-alerts` → **Create**
+2. **Create subscription** → Email → enter your email → confirm from inbox
+
+### 7. Create Remediation Lambda
+
+1. Go to **IAM → Roles → Create role** → Lambda → attach **AWSLambdaBasicExecutionRole** → **Name:** `SecurityRemediationRole` → **Create**
+2. Add inline policy with the JSON from the CLI section (S3, EC2, CloudTrail, SNS permissions) → **Name:** `RemediationPolicy`
+3. Go to **Lambda → Create function** → **Name:** `SecurityRemediation` | Python 3.11 | Role: `SecurityRemediationRole`
+4. Paste `remediation-lambda/index.py` → **Deploy**
+5. **Configuration → Environment variables:** `ALERT_TOPIC_ARN` = your SNS topic ARN
+
+### 8. Connect Security Hub → Lambda via EventBridge
+
+1. Go to **EventBridge → Rules → Create rule**
+   - **Name:** `security-hub-findings` | **Event bus:** default
+2. **Event source:** AWS events → **Service:** Security Hub → **Event type:** Security Hub Findings - Imported
+3. Add filter for `Severity.Label` = CRITICAL or HIGH under additional filters → **Next**
+4. **Target:** Lambda function → select `SecurityRemediation` → **Create rule**
+5. Go to **Lambda → SecurityRemediation → Configuration → Resource-based policy** and confirm EventBridge is listed
+
+### 9. Enable CloudTrail
+
+1. Go to **CloudTrail → Create trail**
+   - **Trail name:** `production-trail`
+   - **S3 bucket:** Create new → `cloudtrail-logs-<account-id>`
+   - Enable **Multi-region trail** + **Log file validation** + **Include global service events**
+2. Click **Next → Next → Create trail**
+
+### Console Cleanup
+
+1. **GuardDuty → Settings → Disable GuardDuty** (confirm)
+2. **Security Hub → Settings → Disable Security Hub**
+3. **AWS Config → Settings → Stop recording** → delete delivery channel → delete recorder
+4. **Inspector → Account management → Disable Inspector**
+5. **Lambda** → delete `SecurityRemediation`
+6. **EventBridge → Rules** → delete `security-hub-findings`
+7. **SNS** → delete `security-alerts`
+8. **IAM** → delete `SecurityRemediationRole` and `AWSConfigRole`
+9. **S3** → empty and delete `aws-config-<account-id>` and `cloudtrail-logs-<account-id>`
+10. **CloudTrail** → delete `production-trail`
+
+---
+
 ## CLI Automation Summary
 
 The commands above are intended to be run sequentially. Set the following variables at the start of your session:

@@ -1,5 +1,5 @@
-const AWS = require('aws-sdk');
-const secretsManager = new AWS.SecretsManager();
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+const secretsManager = new SecretsManagerClient({});
 
 let cachedSecret = null;
 let cacheExpiry = 0;
@@ -9,7 +9,7 @@ async function getSecret(secretName) {
     return cachedSecret;
   }
 
-  const result = await secretsManager.getSecretValue({ SecretId: secretName }).promise();
+  const result = await secretsManager.send(new GetSecretValueCommand({ SecretId: secretName }));
   cachedSecret = JSON.parse(result.SecretString);
   cacheExpiry = Date.now() + 5 * 60 * 1000;
   return cachedSecret;
@@ -21,8 +21,7 @@ exports.handler = async (event) => {
     statusCode: 200,
     body: JSON.stringify({
       message: 'Loaded secrets successfully',
-      dbUser: dbSecrets.username,
-      secretId: dbSecrets.host
+      dbUser: dbSecrets.username
     })
   };
 };

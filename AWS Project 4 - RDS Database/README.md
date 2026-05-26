@@ -219,6 +219,93 @@ aws cloudwatch put-metric-alarm \
   --statistic Average
 ```
 
+## Console Deployment
+
+### 1. Create a VPC
+
+1. Go to **VPC → Your VPCs → Create VPC**
+   - **Name:** `RDS-VPC` | **IPv4 CIDR:** `10.0.0.0/16` → click **Create VPC**
+2. Select the VPC → **Actions → Edit VPC settings** → enable **DNS hostnames** → save
+
+### 2. Create Subnets
+
+1. Go to **VPC → Subnets → Create subnet**, select `RDS-VPC`, then add three subnets:
+   - **Name:** `rds-private-1a` | **AZ:** `us-east-1a` | **CIDR:** `10.0.1.0/24`
+   - **Name:** `rds-private-1b` | **AZ:** `us-east-1b` | **CIDR:** `10.0.2.0/24`
+   - **Name:** `bastion-public` | **AZ:** `us-east-1a` | **CIDR:** `10.0.10.0/24`
+2. Select `bastion-public` → **Actions → Edit subnet settings** → enable **Auto-assign public IPv4** → save
+
+### 3. Create Internet Gateway and Route Table
+
+1. Go to **VPC → Internet Gateways → Create internet gateway** → **Name:** `RDS-VPC-IGW` → create → **Actions → Attach to VPC** → select `RDS-VPC`
+2. Go to **VPC → Route Tables → Create route table** → **Name:** `public-rt` | **VPC:** `RDS-VPC` → create
+3. Select `public-rt` → **Routes → Edit routes → Add route**: Destination `0.0.0.0/0`, Target: the internet gateway → **Save**
+4. Select `public-rt` → **Subnet associations → Edit → associate `bastion-public`** → save
+
+### 4. Create Security Groups
+
+1. Go to **EC2 → Security Groups → Create security group**
+   - **Name:** `bastion-sg` | **VPC:** `RDS-VPC`
+   - **Inbound:** SSH | Port 22 | Source: **My IP** → click **Create**
+2. Create a second security group:
+   - **Name:** `rds-sg` | **VPC:** `RDS-VPC`
+   - **Inbound:** PostgreSQL | Port 5432 | Source: select `bastion-sg` → click **Create**
+
+### 5. Create DB Subnet Group
+
+1. Go to **RDS → Subnet groups → Create DB subnet group**
+   - **Name:** `rds-subnet-group` | **VPC:** `RDS-VPC`
+   - Add subnets: `rds-private-1a` and `rds-private-1b` → click **Create**
+
+### 6. Create RDS PostgreSQL Instance
+
+1. Go to **RDS → Databases → Create database**
+2. **Creation method:** Standard create | **Engine:** PostgreSQL | **Version:** 15.x
+3. **Template:** Free tier (or Production for Multi-AZ)
+4. **DB instance identifier:** `my-postgres-db`
+5. **Master username:** `dbadmin` | set a strong **Master password**
+6. **Instance type:** `db.t3.micro` | **Storage:** 20 GiB, gp3
+7. **Connectivity:** VPC: `RDS-VPC` | Subnet group: `rds-subnet-group` | Public access: **No** | SG: `rds-sg`
+8. **Additional configuration → Backup retention period:** 7 days | enable **Storage encryption**
+9. Click **Create database** — takes 10–15 minutes
+
+### 7. Create Bastion Host
+
+1. Go to **EC2 → Key Pairs → Create key pair** → **Name:** `bastion-key` | RSA | .pem → download and save securely
+2. Go to **EC2 → Launch instances**
+   - **Name:** `Bastion-Host` | **AMI:** Amazon Linux 2023 | **Instance type:** `t2.micro`
+   - **Key pair:** `bastion-key` | **Network:** `RDS-VPC` | **Subnet:** `bastion-public` | **Auto-assign public IP:** Enable
+   - **Security group:** `bastion-sg` → click **Launch instance**
+3. Copy the **Public IPv4 address** once the instance reaches the running state
+
+### 8. Connect to the Database
+
+SSH to the bastion, then connect to RDS (copy the endpoint from **RDS → Databases → my-postgres-db → Connectivity & security**):
+
+```bash
+ssh -i bastion-key.pem ec2-user@<BASTION_IP>
+sudo yum install postgresql15 -y
+psql -h <RDS_ENDPOINT> -U dbadmin -d postgres
+```
+
+### 9. Create CloudWatch Alarms
+
+1. Go to **CloudWatch → Alarms → Create alarm → Select metric → RDS → Per-Database Metrics**
+2. Select `my-postgres-db` → **CPUUtilization** → **Select metric**
+   - **Period:** 5 min | **Threshold:** Greater than 80 | **Alarm name:** `rds-high-cpu` → create
+3. Repeat for **FreeStorageSpace**, threshold Less than 2000000000 (2 GB), name `rds-low-storage`
+
+### Console Cleanup
+
+1. **RDS → Databases** → delete `my-postgres-db` (uncheck final snapshot for test environments)
+2. **EC2 → Instances** → terminate `Bastion-Host`
+3. **EC2 → Security Groups** → delete `rds-sg` then `bastion-sg`
+4. **RDS → Subnet groups** → delete `rds-subnet-group`
+5. **VPC** → delete subnets → delete route table → detach and delete IGW → delete `RDS-VPC`
+6. **EC2 → Key Pairs** → delete `bastion-key`
+
+---
+
 ## CLI / Automation
 
 Use the provided scripts to create and tear down all resources automatically:

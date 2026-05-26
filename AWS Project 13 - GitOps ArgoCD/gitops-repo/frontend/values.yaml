@@ -13,3 +13,7 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+probes:
+  path: /
+securityContext:
+  runAsUser: 1000

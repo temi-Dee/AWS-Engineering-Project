@@ -1,7 +1,7 @@
 const http = require('http');
-const AWS = require('aws-sdk');
+const { CodeDeployClient, PutLifecycleEventHookExecutionStatusCommand } = require('@aws-sdk/client-codedeploy');
 
-const codedeploy = new AWS.CodeDeploy();
+const codedeploy = new CodeDeployClient({});
 
 /**
  * CodeDeploy lifecycle hook handler.
@@ -70,11 +70,11 @@ function checkHealth(url) {
 
 async function reportStatus(deploymentId, lifecycleEventHookExecutionId, status) {
   try {
-    await codedeploy.putLifecycleEventHookExecutionStatus({
+    await codedeploy.send(new PutLifecycleEventHookExecutionStatusCommand({
       deploymentId,
       lifecycleEventHookExecutionId,
       status
-    }).promise();
+    }));
     console.log(`Reported lifecycle hook status: ${status}`);
   } catch (err) {
     console.error('Failed to report lifecycle hook status:', err.message);

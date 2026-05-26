@@ -292,6 +292,70 @@ aws secretsmanager replicate-secret-to-regions \
   --add-replica-regions Region=us-west-2
 ```
 
+## Console Deployment
+
+### 1. Create Secrets in Secrets Manager
+
+1. Go to **Secrets Manager → Store a new secret**
+2. **Secret type:** Other type of secret → **Key/value** pairs → add:
+   - `username` = `dbadmin`
+   - `password` = your secure password
+   - `host` = your RDS endpoint
+   - `port` = `5432`
+   - `dbname` = `production`
+3. Click **Next** → **Secret name:** `prod/database/credentials` → add tags: `Environment=Production`, `Application=WebApp`
+4. Click **Next → Next → Store**
+5. Repeat to create a second secret named `prod/api/keys` with keys `stripe_api_key` and `sendgrid_api_key`
+
+### 2. Create IAM Role for Rotation Lambda
+
+1. Go to **IAM → Roles → Create role** → AWS service → Lambda → **Next**
+2. Attach **AWSLambdaBasicExecutionRole** and **SecretsManagerReadWrite** → **Next**
+3. **Role name:** `SecretsManagerRotationRole` → **Create role**
+4. Open the role → **Add permissions → Create inline policy** → JSON tab:
+   ```json
+   {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["rds:ModifyDBInstance","rds:DescribeDBInstances"],"Resource":"*"}]}
+   ```
+   **Policy name:** `RDSModifyPolicy` → **Create policy**
+
+### 3. Create Rotation Lambda
+
+1. Go to **Lambda → Create function → Author from scratch**
+   - **Name:** `SecretsManagerRotation` | **Runtime:** Python 3.11
+   - **Execution role:** Use existing → `SecretsManagerRotationRole`
+2. Paste the contents of `rotation-lambda/index.py` into the code editor → **Deploy**
+3. Click **Configuration → Environment variables** → add `SECRETS_MANAGER_ENDPOINT` if needed
+4. Go to **Configuration → VPC** → place the Lambda in the same VPC/subnets as your RDS instance
+
+### 4. Enable Automatic Rotation
+
+1. Go to **Secrets Manager → `prod/database/credentials` → Rotation → Edit rotation**
+2. Enable **Automatic rotation**
+3. **Rotation schedule:** Every 30 days
+4. **Rotation function:** select `SecretsManagerRotation`
+5. Click **Save**
+
+### 5. Create Application Lambda with Secret Access
+
+1. Go to **IAM → Roles → Create role** → Lambda → **Next**
+2. Attach **AWSLambdaBasicExecutionRole** → **Next** → **Role name:** `AppLambdaRole` → **Create**
+3. Open the role → **Add permissions → Create inline policy** → JSON:
+   ```json
+   {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["secretsmanager:GetSecretValue","secretsmanager:DescribeSecret"],"Resource":"arn:aws:secretsmanager:us-east-1:*:secret:prod/*"}]}
+   ```
+   **Policy name:** `SecretsAccessPolicy` → **Create policy**
+4. Go to **Lambda → Create function** → **Name:** `AppWithSecrets` | Runtime: Node.js 18.x | Role: `AppLambdaRole`
+5. Paste `app-lambda/index.js` into the editor → **Deploy**
+
+### Console Cleanup
+
+1. **Secrets Manager** → `prod/database/credentials` → **Actions → Delete secret** (7-day window)
+2. **Secrets Manager** → `prod/api/keys` → **Actions → Delete secret**
+3. **Lambda** → delete `SecretsManagerRotation` and `AppWithSecrets`
+4. **IAM → Roles** → delete `SecretsManagerRotationRole` and `AppLambdaRole` (detach policies first)
+
+---
+
 ## Testing and Validation
 
 ```bash

@@ -312,6 +312,89 @@ aws application-autoscaling put-scaling-policy \
   }'
 ```
 
+## Console Deployment
+
+> **Note:** Steps 1 and 3 (Docker build and push) require a local terminal with Docker installed. All AWS resource creation can be done through the console.
+
+### 1. Build Images Locally
+
+```bash
+docker build -t backend-api:latest ./app/backend
+docker build -t frontend-web:latest ./app/frontend
+```
+
+### 2. Create ECR Repositories
+
+1. Go to **ECR → Repositories → Create repository**
+   - **Visibility:** Private | **Repository name:** `backend-api` → **Create**
+2. Repeat: **Repository name:** `frontend-web` → **Create**
+3. Copy the **URI** for each repository (e.g., `123456789.dkr.ecr.us-east-1.amazonaws.com/backend-api`)
+
+### 3. Authenticate and Push Images
+
+Click **View push commands** on each ECR repository for the exact commands, then run them in your terminal.
+
+### 4. Create CloudWatch Log Groups
+
+1. Go to **CloudWatch → Log groups → Create log group**
+   - **Name:** `/ecs/backend-api` | **Retention:** 30 days → **Create**
+2. Repeat for `/ecs/frontend-web`
+
+### 5. Create ECS Task Execution IAM Role
+
+1. Go to **IAM → Roles → Create role** → AWS service → **Elastic Container Service Task** → **Next**
+2. Attach **AmazonECSTaskExecutionRolePolicy** → **Next**
+3. **Role name:** `ecsTaskExecutionRole` → **Create role**
+
+### 6. Create ECS Task Definitions
+
+1. Go to **ECS → Task definitions → Create new task definition**
+   - **Family:** `backend-api` | **Launch type:** Fargate | **CPU:** 0.25 vCPU | **Memory:** 0.5 GB
+   - **Task execution role:** `ecsTaskExecutionRole`
+   - **Container name:** `backend` | **Image URI:** your ECR backend URI | **Port:** 3000
+   - Under **Log collection:** enable, log group `/ecs/backend-api` → **Create**
+2. Repeat for `frontend-web`, container port 80, log group `/ecs/frontend-web`
+
+### 7. Create Security Groups
+
+1. Go to **EC2 → Security Groups → Create security group**
+   - **Name:** `alb-sg` | **VPC:** default VPC
+   - **Inbound:** HTTP | Port 80 | Source: `0.0.0.0/0` → **Create**
+2. Create another:
+   - **Name:** `ecs-tasks-sg` | **VPC:** default VPC
+   - **Inbound:** Custom TCP | Port 3000 | Source: `alb-sg`
+   - **Inbound:** HTTP | Port 80 | Source: `alb-sg` → **Create**
+
+### 8. Create Application Load Balancer
+
+1. Go to **EC2 → Load Balancers → Create load balancer → Application Load Balancer**
+   - **Name:** `my-app-alb` | **Scheme:** Internet-facing | **Subnets:** select 2+ subnets
+   - **Security group:** `alb-sg`
+2. **Create target group**: IP type | **Name:** `frontend-tg` | Port 80 | health check `/`
+3. **Listener:** HTTP:80 → forward to `frontend-tg` → **Create**
+4. After creation, add a **Listener rule**: path `/api/*` → forward to a second target group `backend-tg` (create it first: IP type, port 3000, health check `/health`)
+
+### 9. Create ECS Cluster and Services
+
+1. Go to **ECS → Clusters → Create cluster** → **Name:** `my-app-cluster` → **Create**
+2. Inside the cluster, click **Create service**
+   - **Launch type:** Fargate | **Task definition:** `backend-api:latest` | **Service name:** `backend-service` | **Desired tasks:** 2
+   - **VPC:** default | **Subnets:** select all | **Security group:** `ecs-tasks-sg`
+   - **Load balancer:** select `my-app-alb` | **Target group:** `backend-tg` | **Container:** backend:3000 → **Create**
+3. Repeat for `frontend-service` using `frontend-web` task definition and `frontend-tg`
+
+### Console Cleanup
+
+1. **ECS** → cluster → update each service to 0 desired tasks → delete services → delete cluster
+2. **EC2 → Load Balancers** → delete `my-app-alb`
+3. **EC2 → Target Groups** → delete `backend-tg` and `frontend-tg`
+4. **EC2 → Security Groups** → delete `alb-sg` and `ecs-tasks-sg`
+5. **ECR** → delete `backend-api` and `frontend-web` repositories
+6. **CloudWatch → Log groups** → delete `/ecs/backend-api` and `/ecs/frontend-web`
+7. **IAM → Roles** → delete `ecsTaskExecutionRole`
+
+---
+
 ## CLI Automation
 
 The `create-docker-app.sh` script scaffolds the full application directory and pushes images to ECR in one step:

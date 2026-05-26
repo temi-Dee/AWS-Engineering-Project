@@ -1,5 +1,5 @@
-const AWS = require('aws-sdk');
-const s3 = new AWS.S3();
+const { S3Client, HeadObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const s3 = new S3Client({});
 
 const BUCKET_NAME = process.env.OUTPUT_BUCKET || 'data-pipeline-output';
 
@@ -20,7 +20,7 @@ exports.handler = async (event) => {
 
       const processed = transform(payload);
 
-      await s3.putObject({
+      await s3.send(new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
         Body: JSON.stringify(processed, null, 2),
@@ -29,7 +29,7 @@ exports.handler = async (event) => {
           'message-id': record.messageId,
           'processed-at': new Date().toISOString()
         }
-      }).promise();
+      }));
 
       console.log(`Processed ${record.messageId} -> s3://${BUCKET_NAME}/${key}`);
     } catch (err) {
@@ -68,10 +68,10 @@ function createS3Key(payload, messageId) {
  */
 async function objectExists(key) {
   try {
-    await s3.headObject({ Bucket: BUCKET_NAME, Key: key }).promise();
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
     return true;
   } catch (err) {
-    if (err.code === 'NotFound' || err.code === '404') {
+    if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
       return false;
     }
     throw err;

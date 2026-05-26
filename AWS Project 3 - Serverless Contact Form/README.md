@@ -219,6 +219,75 @@ curl -X POST "$API_ENDPOINT" \
 
 You should receive a JSON response with `"success": true` and find a new email in your inbox.
 
+## Console Deployment
+
+### 1. Verify Email in Amazon SES
+
+1. Go to **AWS Console → SES → Verified identities**
+2. Click **Create identity** → select **Email address**
+3. Enter your email address → click **Create identity**
+4. Check your inbox for a verification email from AWS and click the link
+
+> **Note:** In SES sandbox mode both the sender and recipient addresses must be verified.
+
+### 2. Create IAM Role for Lambda
+
+1. Go to **IAM → Roles → Create role**
+2. **Trusted entity type:** AWS service → **Use case:** Lambda → click **Next**
+3. Search and attach **AWSLambdaBasicExecutionRole** → click **Next**
+4. **Role name:** `ContactFormLambdaRole` → click **Create role**
+5. Open the role → **Add permissions → Create inline policy** → switch to **JSON** tab and paste:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+       "Resource": "*"
+     }]
+   }
+   ```
+6. **Policy name:** `SESSendPolicy` → click **Create policy**
+
+### 3. Create the Lambda Function
+
+1. Go to **Lambda → Create function → Author from scratch**
+   - **Function name:** `ContactFormHandler`
+   - **Runtime:** Node.js 16.x
+2. Under **Permissions → Change default execution role** → **Use an existing role** → select `ContactFormLambdaRole`
+3. Click **Create function**
+4. In the **Code source** editor, delete the default code and paste the full contents of `lambda/index.js`
+5. Click **Deploy**
+6. Click **Configuration → Environment variables → Edit** and add:
+   - `SENDER_EMAIL` = your verified email
+   - `RECIPIENT_EMAIL` = your verified email
+7. Click **Save**
+
+### 4. Create API Gateway
+
+1. Go to **API Gateway → Create API → REST API** (not private) → click **Build**
+2. **API name:** `ContactFormAPI` → click **Create API**
+3. Click **Create resource** → **Resource name:** `contact` → check **CORS** → click **Create resource**
+4. With `/contact` selected, click **Create method**
+   - **Method type:** POST | **Integration type:** Lambda function | **Lambda proxy integration:** ON
+   - **Lambda function:** `ContactFormHandler` → click **Create method** → click **OK** to grant permission
+5. With `/contact` selected, click **Enable CORS** → check POST and OPTIONS → click **Save**
+
+### 5. Deploy the API
+
+1. Click **Deploy API** (top right) → **Stage:** `[New stage]` → **Stage name:** `prod` → click **Deploy**
+2. Copy the **Invoke URL** — your full contact endpoint is `<Invoke URL>/contact`
+3. Open `frontend/contact.html` and replace `YOUR_API_GATEWAY_ENDPOINT_HERE` with your endpoint URL
+
+### Console Cleanup
+
+1. **API Gateway** → select `ContactFormAPI` → **Actions → Delete API**
+2. **Lambda** → select `ContactFormHandler` → **Actions → Delete**
+3. **IAM → Roles** → delete `ContactFormLambdaRole` (detach/delete policies first)
+4. **SES → Verified identities** → delete your verified email identity
+
+---
+
 ## CLI / Automation
 
 Use `deploy.sh` to perform all of the above steps automatically:

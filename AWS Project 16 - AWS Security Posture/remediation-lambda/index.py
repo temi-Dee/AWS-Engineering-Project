@@ -27,7 +27,8 @@ def lambda_handler(event, context):
 
         if 'Security groups should not allow unrestricted access to port 22' in title:
             for resource in resources:
-                sg_id = resource.get('Id', '')
+                # Security Hub Resource.Id is a full ARN; extract the SG ID after the final '/'
+                sg_id = resource.get('Id', '').split('/')[-1]
                 remediate_ssh(sg_id)
 
         if severity in ['CRITICAL', 'HIGH']:

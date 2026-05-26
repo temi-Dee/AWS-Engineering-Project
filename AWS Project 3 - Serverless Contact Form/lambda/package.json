@@ -10,6 +10,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "aws-sdk": "^2.1000.0"
+    "@aws-sdk/client-ses": "^3.0.0"
   }
 }

@@ -295,6 +295,92 @@ EOF
 kubectl apply -f prometheus-rules.yaml
 ```
 
+## Console Deployment
+
+> **Note:** Prometheus, Grafana, and Loki are deployed via Helm into Kubernetes. The console steps below cover the AWS resource setup. Helm and kubectl are still required for workload deployment.
+
+### 1. Create S3 Bucket for Loki Log Storage
+
+1. Go to **S3 → Create bucket**
+   - **Name:** `loki-logs-<your-account-id>` | block public access: ON
+2. Click **Create bucket**
+
+### 2. Create IAM Policy for Loki S3 Access
+
+1. Go to **IAM → Policies → Create policy** → JSON:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{"Effect":"Allow","Action":["s3:ListBucket","s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::loki-logs-<account-id>","arn:aws:s3:::loki-logs-<account-id>/*"]}]
+   }
+   ```
+   **Policy name:** `LokiS3Policy` → **Create**
+
+### 3. Create IAM Policy for X-Ray
+
+1. **IAM → Policies → Create policy** → JSON:
+   ```json
+   {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["xray:PutTraceSegments","xray:PutTelemetryRecords","xray:GetSamplingRules","xray:GetSamplingTargets"],"Resource":"*"}]}
+   ```
+   **Policy name:** `XRayPolicy` → **Create**
+
+### 4. Update `loki-values.yaml` with Your Account ID
+
+Open `loki-values.yaml` and replace `ACCOUNT_ID` with your 12-digit AWS account ID (find it in the top-right corner of the console).
+
+### 5. Install the Observability Stack (requires kubectl and Helm)
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+
+# Install Prometheus + Grafana
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --values prometheus-values.yaml --timeout 10m
+
+# Create IRSA service accounts for Loki and X-Ray, then install Loki + Promtail
+eksctl create iamserviceaccount --cluster my-eks-cluster --namespace monitoring --name loki \
+  --attach-policy-arn arn:aws:iam::<account-id>:policy/LokiS3Policy --approve
+helm install loki grafana/loki --namespace monitoring --values loki-values.yaml
+helm install promtail grafana/promtail --namespace monitoring --values promtail-values.yaml
+```
+
+### 6. Access Grafana via Browser
+
+```bash
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring &
+```
+
+Open `http://localhost:3000` — log in with `admin` / `admin123`.
+
+### 7. Verify X-Ray Traces in AWS Console
+
+1. Go to **AWS X-Ray → Service map** — after deploying instrumented apps, traces appear here
+2. Click **Traces** to view individual request details and latency breakdowns
+
+### 8. Import Dashboard and Apply Alerting Rules
+
+```bash
+# Import the SLI/SLO dashboard
+curl -X POST "http://localhost:3000/api/dashboards/db" \
+  -H "Content-Type: application/json" -u admin:admin123 \
+  -d "{\"dashboard\": $(cat dashboard.json), \"overwrite\": true, \"folderId\": 0}"
+
+# Apply Prometheus alerting rules
+kubectl apply -f prometheus-rules.yaml
+```
+
+### Console Cleanup
+
+1. **S3** → empty and delete `loki-logs-<account-id>`
+2. **IAM → Policies** → delete `LokiS3Policy` and `XRayPolicy`
+3. Run `helm uninstall kube-prometheus-stack loki promtail -n monitoring`
+4. `kubectl delete namespace monitoring`
+
+---
+
 ## CLI / Automation Reference
 
 ```bash

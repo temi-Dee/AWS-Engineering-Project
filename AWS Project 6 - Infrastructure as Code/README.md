@@ -151,6 +151,60 @@ terraform apply
 
 Terraform shows exactly what will change, add, or be destroyed before making any modification.
 
+## Console Deployment
+
+> **Note:** Terraform is a CLI tool and cannot be replaced by the console. The console steps below set up the **remote state backend** resources manually, then you run Terraform from your terminal. The remaining subsections show what each Terraform module creates in the console so you can verify the deployment.
+
+### 1. Create S3 Bucket for Terraform State
+
+1. Go to **S3 → Create bucket**
+   - **Bucket name:** `terraform-state-<your-account-id>` (must be globally unique)
+   - **Region:** us-east-1
+   - Keep **Block all public access** enabled
+2. Click **Create bucket**
+3. Open the bucket → **Properties → Bucket Versioning → Edit** → enable versioning → **Save**
+4. Go to **Properties → Default encryption → Edit** → enable **SSE-S3** → **Save**
+
+### 2. Create DynamoDB Table for State Locking
+
+1. Go to **DynamoDB → Tables → Create table**
+   - **Table name:** `terraform-state-lock`
+   - **Partition key:** `LockID` (String)
+   - **Billing mode:** On-demand
+2. Click **Create table**
+
+### 3. Initialize and Apply Terraform
+
+Update `terraform-project/backend.tf` with your account ID, then from your terminal:
+
+```bash
+cd terraform-project
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+
+### 4. Verify Resources in the Console
+
+After `terraform apply` completes, verify these resources were created:
+
+| Resource | Console location |
+|----------|-----------------|
+| VPC | VPC → Your VPCs |
+| Subnets, Route tables | VPC → Subnets / Route Tables |
+| Security groups | EC2 → Security Groups |
+| EC2 instances | EC2 → Instances |
+| RDS instance | RDS → Databases |
+
+### Console Cleanup
+
+Run `terraform destroy` to remove all managed resources, then:
+
+1. **DynamoDB** → delete `terraform-state-lock`
+2. **S3** → empty and delete `terraform-state-<account-id>`
+
+---
+
 ## CLI Automation
 
 The `create-terraform-project.sh` script in the project root scaffolds the entire directory structure with all module files in one step:

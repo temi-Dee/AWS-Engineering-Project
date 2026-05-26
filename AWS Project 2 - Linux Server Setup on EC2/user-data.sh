@@ -81,8 +81,35 @@ def health():
     return {'status': 'healthy'}, 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=80, debug=False)
+    # Bind to 8080; nginx proxies port 80 → here so we never need root
+    app.run(host='0.0.0.0', port=8080, debug=False)
 APPEOF
+
+# Install nginx as the public-facing port-80 listener
+apt-get install -y nginx
+
+cat > /etc/nginx/sites-available/webapp << 'NGINXEOF'
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:8080/health;
+    }
+}
+NGINXEOF
+
+ln -sf /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/webapp
+rm -f /etc/nginx/sites-enabled/default
+systemctl enable nginx
+systemctl start nginx
 
 # Create systemd service file for application
 cat > /etc/systemd/system/webapp.service << 'SERVICEEOF'

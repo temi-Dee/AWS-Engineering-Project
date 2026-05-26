@@ -19,8 +19,9 @@ resource "aws_db_instance" "main" {
   publicly_accessible    = false
   db_subnet_group_name   = aws_db_subnet_group.rds.name
   vpc_security_group_ids = [var.db_security_group_id]
-  skip_final_snapshot    = true
-  deletion_protection    = false
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.project_name}-final-snapshot"
+  deletion_protection       = true
   storage_encrypted      = true
 
   tags = {

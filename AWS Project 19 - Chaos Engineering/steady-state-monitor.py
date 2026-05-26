@@ -2,7 +2,7 @@ import os
 import boto3
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -22,7 +22,7 @@ def lambda_handler(event, context):
         logger.error('ALB_DIMENSION environment variable is not set')
         return {'error': 'ALB_DIMENSION not configured'}
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     start = now - timedelta(minutes=5)
 
     response = cloudwatch.get_metric_statistics(

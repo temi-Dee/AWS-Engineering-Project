@@ -18,6 +18,10 @@
     {
       "source": "aws:cloudwatch:alarm",
       "value": "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:high-error-rate"
+    },
+    {
+      "source": "aws:cloudwatch:alarm",
+      "value": "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:high-latency"
     }
   ],
   "roleArn": "arn:aws:iam::ACCOUNT_ID:role/FISExperimentRole",

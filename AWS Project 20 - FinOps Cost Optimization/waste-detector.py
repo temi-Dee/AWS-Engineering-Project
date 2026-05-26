@@ -2,7 +2,7 @@ import os
 import boto3
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -46,12 +46,15 @@ def lambda_handler(event, context):
             total_savings += 3.65
 
     # 3. Old EBS snapshots (older than 30 days)
-    cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     snapshots = ec2.describe_snapshots(OwnerIds=['self'])
     for snap in snapshots['Snapshots']:
-        if snap['StartTime'].replace(tzinfo=None) < cutoff:
+        start_time = snap['StartTime']
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if start_time < cutoff:
             savings = snap['VolumeSize'] * 0.05  # $0.05/GB-month for snapshot storage
-            age_days = (datetime.utcnow() - snap['StartTime'].replace(tzinfo=None)).days
+            age_days = (datetime.now(timezone.utc) - start_time).days
             findings.append({
                 'type': 'Old Snapshot (>30 days)',
                 'resource': snap['SnapshotId'],
@@ -71,8 +74,8 @@ def lambda_handler(event, context):
                 Namespace='AWS/EC2',
                 MetricName='CPUUtilization',
                 Dimensions=[{'Name': 'InstanceId', 'Value': instance_id}],
-                StartTime=datetime.utcnow() - timedelta(days=7),
-                EndTime=datetime.utcnow(),
+                StartTime=datetime.now(timezone.utc) - timedelta(days=7),
+                EndTime=datetime.now(timezone.utc),
                 Period=86400,
                 Statistics=['Average']
             )
@@ -112,7 +115,7 @@ def lambda_handler(event, context):
     # Build and send report
     report_lines = [
         'AWS Cost Optimization Report',
-        f'Generated: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC',
+        f'Generated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")} UTC',
         '',
         f'Total Potential Monthly Savings: ${total_savings:.2f}',
         f'Total Findings: {len(findings)}',

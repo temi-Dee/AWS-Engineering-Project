@@ -7,7 +7,6 @@ set -e
 echo "🚀 Deploying RDS PostgreSQL Database..."
 
 # Variables
-DB_PASSWORD="YourSecurePassword123!"  # CHANGE THIS
 REGION="us-east-1"
 
 # Colors
@@ -16,9 +15,11 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Check if password is changed
-if [ "$DB_PASSWORD" == "YourSecurePassword123!" ]; then
-    echo -e "${YELLOW}⚠️  Using default password. Consider changing DB_PASSWORD variable.${NC}"
+# Require DB_PASSWORD to be supplied via environment variable — never hard-code it
+if [ -z "${DB_PASSWORD:-}" ]; then
+    echo -e "${YELLOW}ERROR: DB_PASSWORD environment variable must be set before running this script.${NC}"
+    echo "  Example: export DB_PASSWORD=\$(aws secretsmanager get-secret-value --secret-id prod/db/master --query SecretString --output text | jq -r .password)"
+    exit 1
 fi
 
 # Step 1: Create VPC and Subnets
@@ -147,7 +148,7 @@ aws rds create-db-instance \
   --db-instance-identifier my-postgres-db \
   --db-instance-class db.t3.micro \
   --engine postgres \
-  --engine-version 15.4 \
+  --engine-version 15 \
   --master-username dbadmin \
   --master-user-password "$DB_PASSWORD" \
   --allocated-storage 20 \
@@ -220,8 +221,8 @@ Database Details:
 - Endpoint: $DB_ENDPOINT
 - Port: 5432
 - Username: dbadmin
-- Password: $DB_PASSWORD
-- Engine: PostgreSQL 15.4
+- Password: (stored in \$DB_PASSWORD env var — do not log here)
+- Engine: PostgreSQL 15
 - Multi-AZ: Enabled
 - Backup Retention: 7 days
 
@@ -248,7 +249,7 @@ Connection Instructions:
 3. Connect to database:
    psql -h $DB_ENDPOINT -U dbadmin -d postgres
 
-4. Enter password when prompted: $DB_PASSWORD
+4. Enter the password from your secrets store when prompted.
 
 Test Commands:
 CREATE DATABASE testdb;

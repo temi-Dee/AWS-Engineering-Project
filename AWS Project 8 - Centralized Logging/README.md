@@ -288,6 +288,79 @@ aws logs put-subscription-filter \
   --destination-arn "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:LogProcessor"
 ```
 
+## Console Deployment
+
+### 1. Create CloudWatch Log Groups
+
+1. Go to **CloudWatch → Log groups → Create log group**
+2. Create four log groups, setting **Retention** to 14 days for each:
+   - `/aws/application/web-server`
+   - `/aws/application/api-server`
+   - `/aws/nginx/access`
+   - `/aws/nginx/error`
+
+### 2. Install CloudWatch Agent on EC2
+
+1. Connect to your EC2 instance via **EC2 → Connect → Session Manager**
+2. Run the following to install and start the agent:
+   ```bash
+   wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
+   sudo rpm -U ./amazon-cloudwatch-agent.rpm
+   sudo cp cloudwatch-agent-config.json /opt/aws/amazon-cloudwatch-agent/etc/config.json
+   sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
+   sudo systemctl enable amazon-cloudwatch-agent
+   ```
+
+### 3. Create Metric Filters
+
+1. Go to **CloudWatch → Log groups** → click `/aws/application/web-server`
+2. Click **Metric filters → Create metric filter**
+   - **Filter pattern:** `[time, request_id, level = ERROR*, ...]`
+   - Click **Next** → **Metric namespace:** `CustomApp` | **Metric name:** `ApplicationErrors` | **Metric value:** `1` | **Default value:** `0`
+   - Click **Next → Create metric filter**
+3. Repeat for `/aws/nginx/access` with pattern `[ip, id, user, timestamp, request, status_code=5*, size]`, metric name `5xxErrors`
+
+### 4. Create SNS Topic for Alerts
+
+1. Go to **SNS → Topics → Create topic** → **Standard** → **Name:** `cloudwatch-alerts` → **Create**
+2. Click **Create subscription** → **Protocol:** Email → **Endpoint:** your email → **Create subscription**
+3. Confirm the subscription by clicking the link in the email you receive
+
+### 5. Create CloudWatch Alarms
+
+1. Go to **CloudWatch → Alarms → Create alarm → Select metric → CustomApp → ApplicationErrors**
+2. **Period:** 5 min | **Statistic:** Sum | **Threshold:** Greater than 10
+3. **Send notification to:** select `cloudwatch-alerts` SNS topic
+4. **Alarm name:** `high-error-rate` → **Create alarm**
+5. Repeat for CPU: **AWS/EC2 → CPUUtilization** → threshold Greater than 80, name `high-cpu-usage`
+
+### 6. Create CloudWatch Dashboard
+
+1. Go to **CloudWatch → Dashboards → Create dashboard** → **Name:** `ApplicationMonitoring` → **Create**
+2. Add widgets: click **Add widget** → choose **Line** or **Number** → select metrics from `CustomApp` namespace
+3. Click **Save dashboard**
+
+### 7. Set Up OpenSearch Domain (Optional)
+
+1. Go to **OpenSearch Service → Create domain**
+   - **Domain name:** `application-logs`
+   - **Deployment option:** Multi-AZ | **Instance type:** `t3.small.search` | **Nodes:** 2
+   - **EBS storage:** 20 GiB gp3
+   - Enable **Node-to-node encryption**, **Encryption at rest**, **Require HTTPS**
+2. Click **Create** — takes 10–15 minutes
+
+### Console Cleanup
+
+1. **CloudWatch → Log groups** → delete all four log groups
+2. **CloudWatch → Alarms** → delete `high-error-rate` and `high-cpu-usage`
+3. **CloudWatch → Dashboards** → delete `ApplicationMonitoring`
+4. **SNS → Topics** → delete `cloudwatch-alerts`
+5. **OpenSearch** → delete `application-logs` domain (if created)
+6. **Lambda** → delete `LogProcessor` (if created)
+7. **IAM → Roles** → delete `LogProcessorLambdaRole`
+
+---
+
 ## CloudWatch Insights Queries
 
 ```bash

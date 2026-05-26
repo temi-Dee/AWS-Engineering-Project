@@ -13,7 +13,8 @@ NC='\033[0m'
 # Read deployment info
 if [ -f deployment-info.txt ]; then
     BUCKET_NAME=$(grep "S3 Bucket:" deployment-info.txt | awk '{print $3}')
-    DIST_ID=$(grep "CloudFront Distribution ID:" deployment-info.txt | awk '{print $4}')
+    DIST_ID=$(grep "CloudFront Distribution ID:" deployment-info.txt | awk '{print $5}')
+    OAC_ID=$(grep "OAC ID:" deployment-info.txt | awk '{print $4}')
 fi
 
 # Step 1: Disable and delete CloudFront distribution
@@ -54,6 +55,13 @@ if [ ! -z "$BUCKET_NAME" ]; then
     aws s3 rm s3://$BUCKET_NAME --recursive 2>/dev/null || true
     aws s3 rb s3://$BUCKET_NAME 2>/dev/null || true
     echo -e "${GREEN}✓ S3 bucket deleted${NC}"
+fi
+
+# Step 3: Delete Origin Access Control
+if [ -n "${OAC_ID:-}" ]; then
+    echo -e "${BLUE}Step 3: Deleting Origin Access Control...${NC}"
+    aws cloudfront delete-origin-access-control --id $OAC_ID 2>/dev/null || true
+    echo -e "${GREEN}✓ OAC deleted${NC}"
 fi
 
 # Clean up local files

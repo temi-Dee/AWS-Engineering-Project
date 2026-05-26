@@ -286,6 +286,78 @@ kubectl create clusterrolebinding platform-user-edit \
   --serviceaccount=default:platform-user
 ```
 
+## Console Deployment
+
+> **Note:** Platform Engineering is primarily code-driven (Terraform, Backstage, Helm). The console steps below cover the AWS resource prerequisites. The rest requires local tools.
+
+### 1. Create GitHub Repository for Terraform Modules (GitHub UI)
+
+1. Go to **github.com → New repository**
+   - **Name:** `terraform-modules` | **Visibility:** Private → **Create**
+2. Copy the `terraform-modules/vpc/` files from this project into the repo under `modules/vpc/`
+3. Push and create the tag: `modules/vpc/v1.0.0` (via GitHub UI: **Releases → Create a new release**)
+
+### 2. Create S3 Bucket for TechDocs
+
+1. Go to **S3 → Create bucket**
+   - **Name:** `backstage-techdocs-<account-id>` | **Region:** us-east-1
+   - Keep **Block all public access** enabled
+2. Click **Create bucket**
+3. Add a bucket policy allowing the EKS service account to read/write objects (use the ARN from your IRSA service account)
+
+### 3. Create ECR Repository for Backstage
+
+1. Go to **ECR → Repositories → Create repository**
+   - **Visibility:** Private | **Name:** `backstage` → **Create**
+2. Click **View push commands** to get the Docker login, tag, and push commands for your terminal
+
+### 4. Create IAM OIDC Provider for GitHub Actions
+
+1. Go to **IAM → Identity providers → Add provider**
+   - **Provider type:** OpenID Connect
+   - **URL:** `https://token.actions.githubusercontent.com` → **Get thumbprint**
+   - **Audience:** `sts.amazonaws.com` → **Add provider**
+
+### 5. Build and Deploy Backstage (requires local tools)
+
+After completing the AWS console setup, run from your terminal:
+
+```bash
+# Install and build Backstage
+npx @backstage/create-app@latest --path=backstage
+cd backstage
+yarn install && yarn build
+
+# Build and push Docker image
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+docker build -t backstage .
+docker tag backstage:latest $ECR_REGISTRY/backstage:latest
+docker push $ECR_REGISTRY/backstage:latest
+
+# Deploy to EKS
+helm repo add backstage https://backstage.github.io/charts
+helm install backstage backstage/backstage --namespace backstage --create-namespace -f backstage-values.yaml
+```
+
+### 6. Access Backstage via Browser
+
+```bash
+kubectl port-forward svc/backstage 7007:7007 -n backstage
+```
+
+Open `http://localhost:7007` in your browser to use the Internal Developer Platform.
+
+### Console Cleanup
+
+1. **ECR** → delete `backstage` repository
+2. **S3** → empty and delete `backstage-techdocs-<account-id>`
+3. **IAM → Identity providers** → delete `token.actions.githubusercontent.com`
+4. Run `helm uninstall backstage -n backstage && kubectl delete namespace backstage`
+
+---
+
 ## CLI Automation Summary
 
 Key variables used across steps:

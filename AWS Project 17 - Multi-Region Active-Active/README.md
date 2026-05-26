@@ -306,6 +306,78 @@ aws cloudwatch put-metric-alarm \
   --alarm-actions arn:aws:sns:us-east-1:$ACCOUNT_ID:ops-alerts
 ```
 
+## Console Deployment
+
+### 1. Deploy Application Infrastructure in Both Regions
+
+Repeat these steps in both `us-east-1` and `eu-west-1`:
+- Create a VPC, subnets, security groups, ECS cluster, and ALB in each region
+- Ensure each ALB exposes a `/health` endpoint
+
+### 2. Create DynamoDB Global Table
+
+1. Go to **DynamoDB → Tables → Create table** (in us-east-1)
+   - **Table name:** `global-app-data`
+   - **Partition key:** `pk` (String) | **Sort key:** `sk` (String)
+   - **Billing mode:** On-demand
+2. Under **Additional settings → DynamoDB Streams:** enable → select **New and old images**
+3. Click **Create table** — wait for status Active
+4. Open the table → **Global Tables → Create replica**
+   - Select `eu-west-1` → **Create replica**
+5. Wait for replication status to show **Active** in both regions
+
+### 3. Create S3 Buckets with Cross-Region Replication
+
+1. Go to **S3 → Create bucket** in `us-east-1`
+   - **Name:** `app-assets-primary-<account-id>` | enable **Bucket Versioning** → **Create**
+2. Create a second bucket in **eu-west-1**
+   - **Name:** `app-assets-secondary-<account-id>` | enable **Bucket Versioning** → **Create**
+3. Open the primary bucket → **Management → Replication rules → Create replication rule**
+   - **Rule name:** `ReplicateAll` | **Status:** Enabled
+   - **Source:** All objects
+   - **Destination:** `app-assets-secondary-<account-id>` (eu-west-1)
+   - **IAM role:** Create new role automatically
+   - Enable **Replicate delete markers** → **Save**
+
+### 4. Create AWS Global Accelerator
+
+1. Go to **Global Accelerator → Create accelerator**
+   - **Name:** `my-app-accelerator` | **Type:** Standard → **Next**
+2. **Listener:** Protocol HTTP | Port 80 → **Next**
+3. **Endpoint groups:**
+   - Add endpoint group: **Region:** us-east-1 | **Traffic dial:** 100% | **Health check path:** `/health`
+   - Add endpoint: select your us-east-1 ALB | **Weight:** 128
+   - Add a second endpoint group for eu-west-1 with your eu-west-1 ALB
+4. Click **Create accelerator** — note the two static Anycast IP addresses provided
+
+### 5. Configure Route 53 Latency-Based Routing
+
+1. Go to **Route 53 → Hosted zones** → select your domain
+2. Click **Create record**
+   - **Record name:** `app` | **Record type:** A | **Alias:** ON → select your us-east-1 ALB
+   - **Routing policy:** Latency | **Region:** us-east-1 | **Record ID:** `primary-us-east-1`
+   - **Evaluate target health:** ON → **Create**
+3. Repeat for eu-west-1 ALB: **Record ID:** `secondary-eu-west-1` | **Region:** eu-west-1
+
+### 6. Create Route 53 Health Checks
+
+1. Go to **Route 53 → Health checks → Create health check**
+   - **Name:** `primary-health` | **Type:** HTTP | **Domain:** your us-east-1 ALB DNS | **Path:** `/health`
+   - **Request interval:** 10 sec | **Failure threshold:** 3 → **Create**
+2. Repeat for eu-west-1 ALB → **Name:** `secondary-health`
+3. Attach each health check to its corresponding latency record (edit each Route 53 record → select health check)
+
+### Console Cleanup
+
+1. **Global Accelerator** → disable the accelerator → delete listeners → delete accelerator
+2. **DynamoDB → global-app-data → Global Tables** → remove eu-west-1 replica → then delete the table
+3. **S3** → disable replication rule on primary bucket → empty and delete both buckets
+4. **Route 53** → delete the A records for `app.yourdomain.com`
+5. **Route 53 → Health checks** → delete both health checks
+6. **IAM → Roles** → delete `S3ReplicationRole`
+
+---
+
 ## Testing and Validation
 
 ```bash
